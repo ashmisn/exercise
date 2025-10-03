@@ -419,7 +419,18 @@ def build_html_content(data):
 # NEW ENDPOINT: DOWNLOAD PDF REPORT (FIX for 404 error)
 # -------------------------------------------------------------------------
 
-@app.get("/api/download_pdf/{user_id}")
+# ... (Imports and sections 1 through 4 remain unchanged) ...
+
+# =========================================================================
+# 5. API ENDPOINTS (Progress endpoints unchanged)
+# =========================================================================
+# ... (Root, get_plan, analyze_frame, save_session, get_progress remain unchanged) ...
+
+# -------------------------------------------------------------------------
+# NEW ENDPOINT: DOWNLOAD PDF REPORT (SIMPLIFIED PATH)
+# -------------------------------------------------------------------------
+
+@app.get("/pdf/{user_id}")  # <-- CHANGED ROUTE HERE
 async def download_pdf_report(user_id: str):
     """
     Fetches progress data by calling the get_progress endpoint internally, 
@@ -440,7 +451,6 @@ async def download_pdf_report(user_id: str):
         HTML(string=html_content).write_pdf(PDF_FILENAME)
 
         # 3. Return the file
-        # Setting Content-Disposition header forces a file download
         headers = {'Content-Disposition': f'attachment; filename="{PDF_FILENAME}"'}
         print(f"File created successfully: {PDF_FILENAME}. Preparing to send...")
         
@@ -452,10 +462,8 @@ async def download_pdf_report(user_id: str):
         )
 
     except HTTPException as e:
-        # Re-raise explicit HTTP errors (like 404 from no data)
         raise e
     except Exception as e:
-        # Log and raise a generic 500 error for unexpected failures (like WeasyPrint dependencies)
         print(f"Error generating or serving PDF: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to generate PDF report. Check server logs for WeasyPrint system dependencies. Error: {str(e)}")
@@ -469,6 +477,7 @@ async def download_pdf_report(user_id: str):
              except Exception as e:
                  print(f"Warning: Failed to delete temporary file {PDF_FILENAME}. Error: {e}")
 
+# ... (Sections 6 and 7 remain unchanged) ...
 
 # =========================================================================
 # 7. MAIN EXECUTION
