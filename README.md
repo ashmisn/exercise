@@ -83,21 +83,7 @@ The frontend will run at `http://localhost:5173`
 cd backend
 ```
 
-2. Create a Python virtual environment:
-```bash
-python -m venv venv
-```
-
-3. Activate the virtual environment:
-```bash
-# On macOS/Linux:
-source venv/bin/activate
-
-# On Windows:
-venv\Scripts\activate
-```
-
-4. Install Python dependencies:
+2. Install Python dependencies:
 ```bash
 pip install -r requirements.txt
 ```
@@ -118,7 +104,7 @@ You can view the interactive API documentation at `http://localhost:8000/docs`
 1. **Terminal 1** - Start Backend:
 ```bash
 cd backend
-source venv/bin/activate  # or venv\Scripts\activate on Windows
+on  python 3.12 version 
 python main.py
 ```
 
