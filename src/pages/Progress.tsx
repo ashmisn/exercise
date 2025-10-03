@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { TrendingUp, Calendar, Target, Award, Activity, AlertCircle, Download } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext'; // Original, correct import
 
-
 // --- DUMMY INTERFACES (Required for Component to run in isolation) ---
 interface ProgressData {
     user_id: string;
@@ -33,14 +32,14 @@ declare global {
 // -------------------------------------------------------------------
 
 // --- NEW GLOBAL SCRIPT LOADER FUNCTION ---
+// NOTE: We still load the scripts asynchronously, but the main component won't wait for this Promise.
 const scriptPromise = new Promise<void>((resolve, reject) => {
     let loadedCount = 0;
     const requiredScripts = 2;
 
     const scriptLoaded = () => {
         loadedCount++;
-        // Check if both scripts have loaded AND their respective global variables exist
-        if (loadedCount === requiredScripts && window.html2canvas && window.jsPDF) {
+        if (loadedCount === requiredScripts) {
             resolve();
         }
     };
@@ -68,24 +67,23 @@ export const Progress: React.FC = () => {
     const [progressData, setProgressData] = useState<ProgressData | null>(null);
     const [loading, setLoading] = useState(true);
     const [fetchError, setFetchError] = useState<string | null>(null);
-    const [isScriptLoaded, setIsScriptLoaded] = useState(false); // Script status
+    const [isGenerating, setIsGenerating] = useState(false); // Track generation status
+    // CRITICAL FIX: Set to TRUE by default, as the click handles the failure immediately
+    const [isScriptLoaded, setIsScriptLoaded] = useState(true); 
 
     const userId = user?.id || 'default_test_user'; 
 
     useEffect(() => {
-        // Wait for PDF scripts AND fetch progress data
-        Promise.all([
-            scriptPromise,
-            fetchProgress()
-        ]).then(() => {
-            setIsScriptLoaded(true);
+        // Only fetch progress data in useEffect. PDF script promise runs in parallel.
+        fetchProgress();
+        
+        // Use the promise only to log success/failure, not to block the UI.
+        scriptPromise.then(() => {
             console.log("PDF generation scripts successfully loaded.");
         }).catch(err => {
-            console.error("Initialization failed:", err);
-            // Don't set error/loading here, as fetchProgress already handles it
+            console.warn("PDF script loading failed, relying on fallback.", err);
         });
 
-        // The fetchProgress call handles the loading state
     }, [userId]); 
 
     const fetchProgress = async () => {
@@ -112,19 +110,27 @@ export const Progress: React.FC = () => {
 
     // --- PDF DOWNLOAD LOGIC ---
     const downloadReport = async () => {
-        // Since the button is disabled until isScriptLoaded is true, we assume success here
-        if (!isScriptLoaded) {
-            console.error('Download clicked before scripts were ready.');
+        if (isGenerating) return;
+        setIsGenerating(true);
+        
+        const input = reportRef.current;
+        if (!input) {
+            setIsGenerating(false);
             return;
         }
 
-        const input = reportRef.current;
-        if (!input) return;
+        // CRITICAL CHECK: Check if dynamic libraries are available.
+        if (!window.html2canvas || !window.jsPDF) {
+             console.log('PDF libraries not initialized. Falling back to browser print.');
+             window.print();
+             setIsGenerating(false);
+             return;
+        }
 
         try {
-            // Capture the entire report div as an image
+            // 1. Capture the entire report div as an image
             const canvas = await window.html2canvas(input, {
-                scale: 2, // Use a higher scale for better resolution
+                scale: 2, 
                 logging: false,
                 useCORS: true,
                 scrollX: 0,
@@ -133,7 +139,7 @@ export const Progress: React.FC = () => {
 
             const imgData = canvas.toDataURL('image/jpeg', 1.0);
             
-            // Initialize jsPDF
+            // 2. Initialize jsPDF
             const pdf = new window.jsPDF.jsPDF('p', 'mm', 'a4');
             const pdfWidth = pdf.internal.pageSize.getWidth();
             const pdfHeight = pdf.internal.pageSize.getHeight();
@@ -142,10 +148,9 @@ export const Progress: React.FC = () => {
             let position = 0;
 
             if (imgHeight < pdfHeight) {
-                // Single page PDF
                  pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, imgHeight);
             } else {
-                // Multi-page PDF for long reports
+                // 3. Multi-page PDF logic
                 let heightLeft = imgHeight;
                 while (heightLeft >= 0) {
                     position = heightLeft - imgHeight;
@@ -160,8 +165,11 @@ export const Progress: React.FC = () => {
             pdf.save(`rehab_report_${progressData?.user_id || 'guest'}_${new Date().toLocaleDateString()}.pdf`);
 
         } catch (error) {
-            console.error("Error during PDF generation:", error);
-            setFetchError("Failed to generate PDF. Try reloading the page.");
+            console.error("Error during high-quality PDF generation:", error);
+            // FINAL FALLBACK: If something crashes during generation (e.g., memory), use print.
+             window.print(); 
+        } finally {
+            setIsGenerating(false);
         }
     };
     // -------------------------------
@@ -223,22 +231,21 @@ export const Progress: React.FC = () => {
                     </div>
                     <button
                         onClick={downloadReport}
-                        // CRITICAL: Disable button until scripts are loaded
-                        disabled={!isScriptLoaded} 
+                        // CRITICAL: Button is now enabled by default. It disables only while generating.
+                        disabled={isGenerating} 
                         className={`px-6 py-3 rounded-lg font-medium transition-all inline-flex items-center shadow-md shadow-blue-300/50 ${
-                            isScriptLoaded 
+                            !isGenerating
                             ? 'bg-blue-600 text-white hover:bg-blue-700' 
                             : 'bg-gray-400 text-gray-700 cursor-not-allowed'
                         }`}
                     >
                         <Download className="w-5 h-5 mr-2" />
-                        {isScriptLoaded ? 'Download PDF Report' : 'Loading Report Tools...'}
+                        {isGenerating ? 'Generating...' : 'Download PDF Report'}
                     </button>
                 </div>
 
 
                 {/* Attach ref to the main content container */}
-                {/* Ensure the reportRef wrapper has a white background for PDF readability */}
                 <div ref={reportRef} className="p-4 bg-white rounded-xl shadow-2xl"> 
 
                     {/* KPI Cards (More shadow and lift) */}
