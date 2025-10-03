@@ -3,14 +3,16 @@ import cv2
 import numpy as np
 import time
 from fastapi import FastAPI, HTTPException
-# FIX: Corrected capitalization from CORSMiddleWARE to CORSMiddleware
-from fastapi.middleware.cors import CORSMiddleware 
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict
 import mediapipe as mp
 import json
 import datetime
 import traceback
+import requests
+from weasyprint import HTML, CSS # Added WeasyPrint imports here
+from datetime import datetime as dt # Renamed for clarity in functions
 
 # =========================================================================
 # 1. MEDIAPIPE & FASTAPI SETUP
@@ -561,7 +563,7 @@ def analyze_frame(request: FrameRequest):
                                             
                                     else:
                                         feedback.append({"type": "warning", "message": "Slow down! Ensure controlled return."})
-                                    
+                                        
                                 # Post-counting feedback
                                 if not any(f['type'] in ['warning', 'instruction', 'encouragement'] for f in feedback):
                                     if stage == 'up' and angle > MIN_ANGLE_THRESHOLD_FULL:
@@ -572,7 +574,7 @@ def analyze_frame(request: FrameRequest):
                                         feedback.append({"type": "progress", "message": "Ready to start the next rep."})
                                     elif stage == 'up':
                                         feedback.append({"type": "progress", "message": "Controlled movement upward."})
-                        
+                            
                     else:
                         feedback.append({"type": "warning", "message": "Analysis function missing."})
         
@@ -610,7 +612,7 @@ def analyze_frame(request: FrameRequest):
         raise HTTPException(status_code=500, detail=f"Unexpected server error during analysis: {str(e)}")
 
 # -------------------------------------------------------------------------
-# NEW ENDPOINT: SAVE SESSION DATA (Simulated DB Write)
+# ENDPOINT: SAVE SESSION DATA (Simulated DB Write)
 # -------------------------------------------------------------------------
 
 @app.post("/api/save_session")
@@ -620,7 +622,7 @@ def save_session(data: SessionData):
         IN_MEMORY_DB[data.user_id] = []
         
     session_record = {
-        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "timestamp": dt.now().strftime("%Y-%m-%d %H:%M:%S"),
         "exercise": data.exercise_name,
         "reps": data.reps_completed,
         "accuracy": data.accuracy_score
@@ -633,7 +635,7 @@ def save_session(data: SessionData):
 
 
 # -------------------------------------------------------------------------
-# PROGRESS DATA (Real from Simulated DB)
+# ENDPOINT: PROGRESS DATA (Real from Simulated DB)
 # -------------------------------------------------------------------------
 
 @app.get("/api/progress/{user_id}")
@@ -648,6 +650,7 @@ def get_progress(user_id: str):
             "total_sessions": 0,
             "total_reps": 0,
             "average_accuracy": 0.0,
+            "streak_days": 0,
             "weekly_data": [{"day": day, "reps": 0, "accuracy": 0.0} for day in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]],
             "recent_sessions": [],
         }
@@ -672,7 +675,7 @@ def get_progress(user_id: str):
         try:
             # Parse date from timestamp
             date_part = session['timestamp'].split(' ')[0]
-            date_obj = datetime.datetime.strptime(date_part, '%Y-%m-%d')
+            date_obj = dt.strptime(date_part, '%Y-%m-%d')
             day_name = date_obj.strftime('%a')
             
             if day_name in weekly_map:
@@ -697,18 +700,154 @@ def get_progress(user_id: str):
         "total_sessions": total_sessions,
         "total_reps": total_reps,
         "average_accuracy": round(average_accuracy, 1),
+        "streak_days": 0, # Placeholder/Omitted complex logic
         "weekly_data": weekly_data,
         "recent_sessions": [
             { "date": s['timestamp'].split(' ')[0], "exercise": s['exercise'], "reps": s['reps'], "accuracy": round(s['accuracy'], 1) }
             for s in recent_sessions
         ],
-        # 'streak_days' is omitted as it requires complex date logic that goes beyond simulation scope.
     }
 
 # =========================================================================
-# 6. MAIN EXECUTION
+# 6. PDF REPORT GENERATION SCRIPT (Outside FastAPI runtime)
+# =========================================================================
+
+# --- Helper functions for HTML ---
+def weekly_activity_html(weekly_data):
+    html = ""
+    # Ensure max_reps is at least 1 to avoid ZeroDivisionError
+    max_reps = max([d['reps'] for d in weekly_data] + [1]) 
+    for day in weekly_data:
+        width_percent = (day['reps'] / max_reps) * 100
+        if day['accuracy'] > 90:
+            color = "#16a34a"  # green
+        elif day['accuracy'] > 75:
+            color = "#f59e0b"  # yellow/orange
+        else:
+            color = "#dc2626"  # red
+        html += f"""
+        <div class="week-day" style="page-break-inside: avoid;">
+            <div class="day-label">{day['day']}</div>
+            <div class="bars">
+                <div class="rep-bar" style="width:{width_percent}%;"></div>
+                <div class="accuracy-bar" style="background:{color}; width:{day['accuracy']}%;"></div>
+            </div>
+            <div class="stats">{day['reps']} reps | {day['accuracy']}%</div>
+        </div>
+        """
+    return html
+
+def recent_sessions_html(sessions):
+    html = ""
+    for s in sessions:
+        # datetime is aliased as dt
+        date_str = dt.fromisoformat(s['date']).strftime("%Y-%m-%d %H:%M") 
+        html += f"""
+        <div class="session-card" style="page-break-inside: avoid;">
+            <div class="session-header">
+                <strong>{s['exercise']}</strong> <span class="session-date">{date_str}</span>
+            </div>
+            <div class="session-stats">{s['reps']} reps | {s['accuracy']}% Accuracy</div>
+        </div>
+        """
+    return html
+
+def generate_pdf_report():
+    """Fetches data from the running API and generates a PDF report."""
+    # ---------------- CONFIG ----------------
+    USER_ID = "default_test_user" 
+    # Use the live API endpoint provided in the prompt
+    API_URL = f"https://exercise-7edj.onrender.com/api/progress/{USER_ID}" 
+    PDF_FILENAME = f"mobility_report_{USER_ID}_{dt.now().strftime('%Y%m%d_%H%M%S')}.pdf" # Added minutes/seconds to avoid overwrite
+    # ----------------------------------------
+
+    # --- Fetch progress data ---
+    try:
+        # In a real deployment, you'd use a non-loopback address or internal service discovery
+        response = requests.get(API_URL, timeout=10) # Added timeout
+        response.raise_for_status()
+        data = response.json()
+    except requests.exceptions.ConnectionError:
+         # Handle case where the remote API may not be running or accessible
+         print(f"Error: Cannot connect to the API URL {API_URL}. Ensure the service is running and accessible.")
+         return
+    except Exception as e:
+        print(f"Error fetching progress data: {e}")
+        return
+
+    # --- Build full HTML ---
+    html_content = f"""
+    <html>
+    <head>
+    <meta charset="UTF-8">
+    <title>Mobility Recovery Report</title>
+    <style>
+    @page {{ size: A4; margin: 20mm; }}
+    body {{ font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f0f4f8; }}
+    h1 {{ text-align:center; color:#1e3a8a; }}
+    h2 {{ color:#1e40af; margin-top: 30px; border-bottom:1px solid #ccc; padding-bottom:5px; page-break-after: avoid; }}
+    .kpi-cards {{ display:flex; gap:10px; margin-bottom:30px; flex-wrap: wrap; }}
+    .kpi-card {{
+        flex:1; min-width:120px; background:white; padding:15px; border-radius:10px; box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        text-align:center; page-break-inside: avoid;
+    }}
+    .kpi-card .value {{ font-size:1.8em; font-weight:bold; }}
+    .week-day {{ margin-bottom:15px; }}
+    .day-label {{ font-weight:bold; }}
+    .bars {{ position: relative; height:20px; margin:5px 0; background:#e5e7eb; border-radius:10px; }}
+    .rep-bar {{ position:absolute; left:0; top:0; height:100%; background:#3b82f6; border-radius:10px 0 0 10px; }}
+    .accuracy-bar {{ position:absolute; left:0; top:0; height:100%; border-radius:10px 0 0 10px; opacity:0.4; }}
+    .stats {{ font-size:0.9em; color:#374151; }}
+    .session-card {{ background:white; padding:10px; margin-bottom:10px; border-radius:8px; box-shadow:0 1px 4px rgba(0,0,0,0.1); page-break-inside: avoid; }}
+    .session-header {{ font-weight:bold; display:flex; justify-content:space-between; }}
+    .session-date {{ color:#6b7280; font-size:0.85em; }}
+    .encouragement {{ background:#3b82f6; color:white; padding:15px; border-radius:10px; margin-top:20px; page-break-inside: avoid; }}
+    </style>
+    </head>
+    <body>
+
+    <h1>Mobility Recovery Report</h1>
+    <p style="text-align:center;"><strong>User ID:</strong> {data['user_id']} | <strong>Generated:</strong> {dt.now().strftime('%Y-%m-%d %H:%M')}</p>
+
+    <h2>Overall Stats</h2>
+    <div class="kpi-cards">
+        <div class="kpi-card">Total Sessions<div class="value">{data['total_sessions']}</div></div>
+        <div class="kpi-card">Total Reps<div class="value">{data['total_reps']}</div></div>
+        <div class="kpi-card">Average Accuracy<div class="value">{data['average_accuracy']:.1f}%</div></div>
+        <div class="kpi-card">Streak Days<div class="value">{data['streak_days']}</div></div>
+    </div>
+
+    <h2>Weekly Activity</h2>
+    {weekly_activity_html(data.get('weekly_data', []))}
+
+    <h2>Recent Sessions</h2>
+    {recent_sessions_html(data.get('recent_sessions', []))}
+
+    <div class="encouragement">
+    {'Your streak is incredible! Keep it up!' if data['streak_days']>5 else 'Focus on precision and consistency this week!'}
+    </div>
+
+    </body>
+    </html>
+    """
+
+    # --- Generate PDF ---
+    try:
+        HTML(string=html_content).write_pdf(PDF_FILENAME)
+        print(f"Multi-page PDF generated: {PDF_FILENAME}")
+    except Exception as e:
+        print(f"Error generating PDF report: {e}")
+        # This will catch the WeasyPrint OSError if its dependencies are missing.
+
+# =========================================================================
+# 7. MAIN EXECUTION
 # =========================================================================
 if __name__ == "__main__":
     import uvicorn
-    # WARNING: When running outside a sandbox, ensure host/port configuration is secure.
+    # Start the FastAPI server
     uvicorn.run(app, host="0.0.0.0", port=8000)
+    
+    # If you want to test the PDF generation after the server starts 
+    # (you'd need to manually stop uvicorn and call this function, 
+    # or run it in a separate script/process)
+    # generate_pdf_report()
