@@ -42,7 +42,7 @@ export const Home: React.FC<HomeProps> = ({ onStartSession }) => {
     setError('');
 
     try {
-      const response = await fetch('http://localhost:8000/api/get_plan', {
+      const response = await fetch('https://exercise-7edj.onrender.com/api/get_plan', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
