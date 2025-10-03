@@ -1,9 +1,17 @@
-services:
-  - type: web
-    name: exercise-app
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.12.9
+- type: web
+  name: physio-api-backend
+  # Point to the directory containing your main.py and requirements.txt
+  rootDir: backend
+  
+  # Use a compatible Python version via runtime.txt inside the backend folder
+  runtime: python 
+  
+  # Build process: Custom script to install system dependencies before Python libraries
+  buildCommand: bash ./install_python_deps.sh
+  
+  # Start the FastAPI server
+  startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+  
+  envVars:
+    - key: PYTHON_VERSION
+      value: 3.12.9 # Explicitly use Python 3.10, which is stable for MediaPipe
