@@ -585,7 +585,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
                                         
                                         {/* Placeholder for the GIF */}
                                         <img 
-                                            src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExOHpjaHdvNWd6d2M4dmM5aWpsbmJkdzIzY2w1NmI3M28yM2d0czEwMyZlcD12MV9pbnRlcm5hbF9naWYmY3Q9Zw/k39hF3Q7aV6I/giphy.gif" 
+                                            src="standing-shoulder-flexion.gif" 
                                             alt="Shoulder Flexion Exercise GIF" 
                                             className="w-48 h-48 object-contain mx-auto rounded-lg shadow-md"
                                             onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = "https://placehold.co/192x192/4488ff/ffffff?text=EXERCISE+GIF"; }}
