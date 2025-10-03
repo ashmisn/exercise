@@ -169,7 +169,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         }
         
         try {
-            const response = await fetch('http://localhost:8000/api/save_session', {
+            const response = await fetch('https://exercise-7edj.onrender.com/api/save_session', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -244,7 +244,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         const latestState = sessionStateRef.current; 
 
         try {
-            const response = await fetch('http://localhost:8000/api/analyze_frame', {
+            const response = await fetch('https://exercise-7edj.onrender.com/api/analyze_frame', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
