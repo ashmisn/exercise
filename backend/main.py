@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 import time
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.cors import CORSMiddleWARE
 from pydantic import BaseModel
 from typing import List, Optional, Dict
 import mediapipe as mp
@@ -176,7 +176,7 @@ def calculate_accuracy(current_angle: float, min_range: float, max_range: float)
     
     TARGET_MIN = min_range
     TARGET_MAX = max_range
-    BUFFER = 10 # Allow 10 degrees outside the target before hitting 0%
+    BUFFER = 10 
     
     if current_angle >= TARGET_MIN and current_angle <= TARGET_MAX:
         return 100.0
@@ -195,20 +195,35 @@ def calculate_accuracy(current_angle: float, min_range: float, max_range: float)
     return max(0.0, min(100.0, score))
 
 
+# --- MODIFIED: Landmark Helper to address 'LEFT' attribute error ---
+def get_landmark_indices(side: str):
+    """Returns the starting index for the LEFT or RIGHT side landmarks."""
+    # LEFT landmarks start at index 11 (SHOULDER)
+    # RIGHT landmarks start at index 12 (SHOULDER)
+    # We must use the specific enum values (e.g., mp_pose.PoseLandmark.LEFT_HIP.value)
+    # inside the analysis functions directly. This function now only determines the side.
+    return {
+        "HIP": mp_pose.PoseLandmark.LEFT_HIP.value if side == "left" else mp_pose.PoseLandmark.RIGHT_HIP.value,
+        "SHOULDER": mp_pose.PoseLandmark.LEFT_SHOULDER.value if side == "left" else mp_pose.PoseLandmark.RIGHT_SHOULDER.value,
+        "ELBOW": mp_pose.PoseLandmark.LEFT_ELBOW.value if side == "left" else mp_pose.PoseLandmark.RIGHT_ELBOW.value,
+        "WRIST": mp_pose.PoseLandmark.LEFT_WRIST.value if side == "left" else mp_pose.PoseLandmark.RIGHT_WRIST.value,
+        "KNEE": mp_pose.PoseLandmark.LEFT_KNEE.value if side == "left" else mp_pose.PoseLandmark.RIGHT_KNEE.value,
+        "ANKLE": mp_pose.PoseLandmark.LEFT_ANKLE.value if side == "left" else mp_pose.PoseLandmark.RIGHT_ANKLE.value,
+        "FOOT_INDEX": mp_pose.PoseLandmark.LEFT_FOOT_INDEX.value if side == "left" else mp_pose.PoseLandmark.RIGHT_FOOT_INDEX.value,
+        "INDEX": mp_pose.PoseLandmark.LEFT_INDEX.value if side == "left" else mp_pose.PoseLandmark.RIGHT_INDEX.value,
+    }
+
 # =========================================================================
 # 4. EXERCISE ANALYSIS FUNCTIONS
 # =========================================================================
 
-def get_landmark_indices(side: str):
-    """Helper to get the correct LEFT or RIGHT landmark prefix."""
-    return mp_pose.PoseLandmark.LEFT if side == "left" else mp_pose.PoseLandmark.RIGHT
-
 def analyze_shoulder_flexion(landmarks, side: str):
-    prefix = get_landmark_indices(side)
+    # CRITICAL FIX: Use the specific landmark indices returned by the helper
+    indices = get_landmark_indices(side)
     
-    LM_HIP = prefix.HIP.value
-    LM_SHOULDER = prefix.SHOULDER.value
-    LM_ELBOW = prefix.ELBOW.value
+    LM_HIP = indices["HIP"]
+    LM_SHOULDER = indices["SHOULDER"]
+    LM_ELBOW = indices["ELBOW"]
     
     if landmarks[LM_HIP].visibility < 0.5 or landmarks[LM_SHOULDER].visibility < 0.5 or landmarks[LM_ELBOW].visibility < 0.5:
         return 0, {}, [{"type": "warning", "message": f"Low visibility for {side} shoulder/hip/elbow."}]
@@ -230,11 +245,11 @@ def analyze_shoulder_abduction(landmarks, side: str):
     return analyze_shoulder_flexion(landmarks, side)
 
 def analyze_shoulder_internal_rotation(landmarks, side: str): 
-    prefix = get_landmark_indices(side)
+    indices = get_landmark_indices(side)
     
-    LM_HIP = prefix.HIP.value
-    LM_ELBOW = prefix.ELBOW.value
-    LM_WRIST = prefix.WRIST.value
+    LM_HIP = indices["HIP"]
+    LM_ELBOW = indices["ELBOW"]
+    LM_WRIST = indices["WRIST"]
     
     if landmarks[LM_HIP].visibility < 0.5 or landmarks[LM_ELBOW].visibility < 0.5 or landmarks[LM_WRIST].visibility < 0.5:
         return 0, {}, [{"type": "warning", "message": f"Low visibility for {side} shoulder/elbow/wrist."}]
@@ -253,11 +268,11 @@ def analyze_shoulder_internal_rotation(landmarks, side: str):
     return angle, angle_coords, []
 
 def analyze_elbow_flexion(landmarks, side: str):
-    prefix = get_landmark_indices(side)
+    indices = get_landmark_indices(side)
 
-    LM_SHOULDER = prefix.SHOULDER.value
-    LM_ELBOW = prefix.ELBOW.value
-    LM_WRIST = prefix.WRIST.value
+    LM_SHOULDER = indices["SHOULDER"]
+    LM_ELBOW = indices["ELBOW"]
+    LM_WRIST = indices["WRIST"]
     
     if landmarks[LM_SHOULDER].visibility < 0.5 or landmarks[LM_ELBOW].visibility < 0.5 or landmarks[LM_WRIST].visibility < 0.5:
         return 0, {}, [{"type": "warning", "message": f"Low visibility for {side} elbow/wrist/shoulder."}]
@@ -279,11 +294,11 @@ def analyze_elbow_extension(landmarks, side: str):
     return analyze_elbow_flexion(landmarks, side)
 
 def analyze_knee_flexion(landmarks, side: str): 
-    prefix = get_landmark_indices(side)
+    indices = get_landmark_indices(side)
 
-    LM_HIP = prefix.HIP.value
-    LM_KNEE = prefix.KNEE.value
-    LM_ANKLE = prefix.ANKLE.value
+    LM_HIP = indices["HIP"]
+    LM_KNEE = indices["KNEE"]
+    LM_ANKLE = indices["ANKLE"]
     
     if landmarks[LM_HIP].visibility < 0.5 or landmarks[LM_KNEE].visibility < 0.5 or landmarks[LM_ANKLE].visibility < 0.5:
         return 0, {}, [{"type": "warning", "message": f"Low visibility for {side} hip/knee/ankle."}]
@@ -302,11 +317,11 @@ def analyze_knee_flexion(landmarks, side: str):
     return angle, angle_coords, []
 
 def analyze_ankle_dorsiflexion(landmarks, side: str): 
-    prefix = get_landmark_indices(side)
+    indices = get_landmark_indices(side)
 
-    LM_KNEE = prefix.KNEE.value
-    LM_ANKLE = prefix.ANKLE.value
-    LM_FOOT = prefix.FOOT_INDEX.value
+    LM_KNEE = indices["KNEE"]
+    LM_ANKLE = indices["ANKLE"]
+    LM_FOOT = indices["FOOT_INDEX"]
     
     if landmarks[LM_KNEE].visibility < 0.5 or landmarks[LM_ANKLE].visibility < 0.5 or landmarks[LM_FOOT].visibility < 0.5:
         return 0, {}, [{"type": "warning", "message": f"Low visibility for {side} knee/ankle/foot."}]
@@ -325,11 +340,11 @@ def analyze_ankle_dorsiflexion(landmarks, side: str):
     return angle, angle_coords, []
 
 def analyze_wrist_flexion(landmarks, side: str): 
-    prefix = get_landmark_indices(side)
+    indices = get_landmark_indices(side)
     
-    LM_ELBOW = prefix.ELBOW.value
-    LM_WRIST = prefix.WRIST.value
-    LM_FINGER = prefix.INDEX.value
+    LM_ELBOW = indices["ELBOW"]
+    LM_WRIST = indices["WRIST"]
+    LM_FINGER = indices["INDEX"]
     
     if landmarks[LM_ELBOW].visibility < 0.5 or landmarks[LM_WRIST].visibility < 0.5 or landmarks[LM_FINGER].visibility < 0.5:
         return 0, {}, [{"type": "warning", "message": f"Low visibility for {side} elbow/wrist/finger."}]
@@ -474,7 +489,7 @@ def analyze_frame(request: FrameRequest):
                              frame_count += 1
                              
                              feedback.append({"type": "progress", "message": f"Calibrating range ({frame_count}/{config['calibration_frames']}). Move fully!"})
-                             accuracy = 0.0 # Accuracy is 0 during calibration
+                             accuracy = 0.0 
                              
                          # Once calibrated (or if reps started)
                          if frame_count >= config['calibration_frames'] or reps > 0:
