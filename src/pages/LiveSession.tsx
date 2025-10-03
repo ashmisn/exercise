@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Camera, StopCircle, Play, AlertCircle } from 'lucide-react';
+import { Camera, StopCircle, Play, AlertCircle, CheckCircle, Award, Hand, HandPlatter, MoveLeft, MoveRight } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext'; // Original, correct import
 
 
@@ -137,7 +137,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
     const hiddenCanvasRef = useRef<HTMLCanvasElement>(null); 
     const drawingCanvasRef = useRef<HTMLCanvasElement>(null); 
     
-    // CRITICAL FIX: Use useRef to store the state that needs to be accessed inside the interval
     const sessionStateRef = useRef<any>({ 
         reps: 0, 
         stage: 'down', 
@@ -145,7 +144,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         last_rep_time: 0 
     }); 
 
-    // Use useState for UI rendering only
+    // UI State
     const [isActive, setIsActive] = useState(false);
     const [reps, setReps] = useState(0);
     const [feedback, setFeedback] = useState<FeedbackItem[]>([]);
@@ -153,11 +152,42 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
     const [error, setError] = useState('');
     const [drawingData, setDrawingData] = useState<DrawingData | null>(null);
     
+    // NEW STATE: Side Toggle Control
+    const [analysisSide, setAnalysisSide] = useState<'auto' | 'left' | 'right'>('auto');
+    const [setsCompleted, setSetsCompleted] = useState(0);
+    const [showCompletionModal, setShowCompletionModal] = useState(false);
+    
     const intervalRef = useRef<NodeJS.Timeout | null>(null);
+    const [lastActivityTime, setLastActivityTime] = useState(Date.now());
+    const PAUSE_TIMEOUT_MS = 5000; 
 
-    // --- NEW: Save Session Result Function ---
-    const saveSessionResult = async (finalReps: number, finalAccuracy: number) => {
-        // Ensure user?.id is checked for robustness, especially in a real Supabase environment
+    // --- PAUSE/INACTIVITY DETECTOR ---
+    useEffect(() => {
+        let pauseCheckInterval: NodeJS.Timeout | null = null;
+
+        if (isActive) {
+            pauseCheckInterval = setInterval(() => {
+                const timeSinceLastActivity = Date.now() - lastActivityTime;
+                
+                if (timeSinceLastActivity > PAUSE_TIMEOUT_MS && reps > 0 && setsCompleted < exercise.sets) {
+                    console.log(`PAUSE DETECTED: Auto-saving session.`);
+                    stopSession(true, true); 
+                }
+            }, 1000); 
+
+        } else if (pauseCheckInterval) {
+            clearInterval(pauseCheckInterval);
+        }
+
+        return () => {
+            if (pauseCheckInterval) clearInterval(pauseCheckInterval);
+        };
+    }, [isActive, lastActivityTime, reps, setsCompleted, exercise.sets]); 
+    // ------------------------------------
+
+
+    // --- Save Session Result Function ---
+    const saveSessionResult = async (finalReps: number, finalAccuracy: number, isAutoSave: boolean) => {
         if (!user?.id) {
             console.error("Cannot save session: User ID is missing.");
             return;
@@ -169,11 +199,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         }
         
         try {
-            const response = await fetch('https://exercise-7edj.onrender.com/api/save_session', {
+            const response = await fetch('https://exercise-7edj.onrender.com/api/save_session', { // Using localhost for dev stability
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    user_id: user.id, // Use the real authenticated user ID
+                    user_id: user.id, 
                     exercise_name: exercise.name,
                     reps_completed: finalReps,
                     accuracy_score: finalAccuracy,
@@ -181,7 +211,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
             });
 
             if (response.ok) {
-                console.log(`Successfully saved ${finalReps} reps for user ${user.id}.`);
+                console.log(`Successfully saved ${finalReps} reps to DB (AutoSave: ${isAutoSave}).`);
             } else {
                 const errorDetail = await response.json().catch(() => ({ detail: 'Unknown Save Error' }));
                 console.error('Failed to save session:', response.status, errorDetail.detail);
@@ -193,7 +223,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
     // ----------------------------------------
 
 
-    // --- useEffect for Drawing ---
+    // --- useEffect for Drawing (Remains the same) ---
     useEffect(() => {
         if (drawingData && drawingCanvasRef.current && isActive) {
             const canvas = drawingCanvasRef.current;
@@ -220,13 +250,12 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
 
     useEffect(() => {
         return () => {
-            // Ensure session is cleaned up on component unmount
-            stopSession(false); 
+            stopSession(false, false); 
         };
     }, []);
 
     const captureAndAnalyze = async () => {
-        if (!videoRef.current || !hiddenCanvasRef.current) return;
+        if (!videoRef.current || !hiddenCanvasRef.current || showCompletionModal) return;
 
         const canvas = hiddenCanvasRef.current;
         const video = videoRef.current;
@@ -242,17 +271,21 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         const frameData = canvas.toDataURL('image/jpeg', 0.8);
 
         const latestState = sessionStateRef.current; 
+        
+        // CRITICAL: Inject the manually selected side into the state sent to the API
+        const stateToSend = {
+            ...latestState,
+            analysis_side: analysisSide === 'auto' ? null : analysisSide 
+        };
 
         try {
             const response = await fetch('https://exercise-7edj.onrender.com/api/analyze_frame', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     frame: frameData,
                     exercise_name: exercise.name,
-                    previous_state: latestState, 
+                    previous_state: stateToSend, 
                 }),
             });
 
@@ -263,34 +296,33 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
 
             const data = await response.json();
 
-            // CRITICAL FIX: Update the mutable ref with the *entire* state returned by the API
-            sessionStateRef.current = data.state;
+            setLastActivityTime(Date.now()); 
 
-            // Update local state (used for rendering UI elements like Reps/Accuracy)
+            // Update mutable ref with the *entire* state returned by the API
+            sessionStateRef.current = data.state;
+            
+            // If the API auto-detected a side, update our local state to reflect it
+            if (data.state.analysis_side && analysisSide === 'auto') {
+                setAnalysisSide(data.state.analysis_side);
+            }
+
+
             setReps(data.reps);
             setFeedback(data.feedback);
             setAccuracy(data.accuracy_score);
-
-            // --- PROCESS DRAWING DATA ---
-            if (data.drawing_landmarks && data.angle_coords) {
-                setDrawingData({
-                    landmarks: data.drawing_landmarks,
-                    angleData: {
-                        angle: data.current_angle,
-                        A: data.angle_coords.A,
-                        B: data.angle_coords.B,
-                        C: data.angle_coords.C,
-                    }
-                });
-            } else {
-                setDrawingData(null);
-            }
-            // ----------------------------
+            setDrawingData({
+                landmarks: data.drawing_landmarks,
+                angleData: {
+                    angle: data.current_angle,
+                    A: data.angle_coords.A,
+                    B: data.angle_coords.B,
+                    C: data.angle_coords.C,
+                }
+            });
 
 
             if (data.reps >= exercise.target_reps) {
-                // When target reps are hit, stop session and save results.
-                stopSession(true); 
+                stopSession(false, false);
             }
         } catch (err) {
             console.error('Analysis error:', err);
@@ -299,8 +331,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         }
     };
 
-    // Modified stopSession to accept a boolean flag for saving data
-    const stopSession = (shouldSave: boolean) => {
+    // Modified stopSession to accept shouldSave and shouldCompletePage flags
+    const stopSession = (shouldSave: boolean, shouldCompletePage: boolean) => {
         // Stop the interval
         if (intervalRef.current) {
             clearInterval(intervalRef.current);
@@ -315,14 +347,19 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         }
 
         if (shouldSave) {
-            // Save the final result before resetting the state
-            saveSessionResult(sessionStateRef.current.reps, accuracy);
+            saveSessionResult(sessionStateRef.current.reps, accuracy, shouldCompletePage);
         }
         
-        // Reset state ref to initial values when stopping
-        sessionStateRef.current = { reps: 0, stage: 'down', angle: 0, last_rep_time: 0 };
+        if (shouldCompletePage) {
+             sessionStateRef.current = { reps: 0, stage: 'down', angle: 0, last_rep_time: 0 };
+        }
+       
         setDrawingData(null); 
         setIsActive(false);
+
+        if (shouldCompletePage) {
+            onComplete(); 
+        }
     };
 
     const startCamera = async () => {
@@ -337,6 +374,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
 
             setIsActive(true);
             setError('');
+            setLastActivityTime(Date.now()); 
+
+            sessionStateRef.current = { reps: 0, stage: 'down', angle: 0, last_rep_time: 0 };
+            setReps(0);
+            setFeedback([]);
 
             intervalRef.current = setInterval(() => {
                 captureAndAnalyze();
@@ -346,18 +388,123 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         }
     };
 
-    const getFeedbackColor = (type: string) => {
-        switch (type) {
-            case 'correction':
-                return 'bg-yellow-50 border-yellow-200 text-yellow-800';
-            case 'encouragement':
-                return 'bg-green-50 border-green-200 text-green-800';
-            case 'warning':
-                return 'bg-red-50 border-red-200 text-red-800';
-            default:
-                return 'bg-gray-50 border-gray-200 text-gray-800';
+    // Function to handle the successful completion of a set
+    const handleSetCompletion = () => {
+        saveSessionResult(reps, accuracy, false); 
+
+        const nextSetsCompleted = setsCompleted + 1;
+        
+        if (nextSetsCompleted >= exercise.sets) {
+            if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+                intervalRef.current = null;
+            }
+            if (videoRef.current && videoRef.current.srcObject) {
+                const stream = videoRef.current.srcObject as MediaStream;
+                stream.getTracks().forEach((track) => track.stop());
+                videoRef.current.srcObject = null;
+            }
+            setIsActive(false);
+            
+            setSetsCompleted(nextSetsCompleted);
+            setShowCompletionModal(true); 
+            
+        } else {
+            setSetsCompleted(nextSetsCompleted);
+            setReps(0);
+            setFeedback([]);
+            sessionStateRef.current = { reps: 0, stage: 'down', angle: 0, last_rep_time: 0 };
+            startCamera(); 
         }
     };
+
+    const getFeedbackColor = (type: string) => {
+        switch (type) {
+            case 'correction': return 'bg-yellow-50 border-yellow-200 text-yellow-800';
+            case 'encouragement': return 'bg-green-50 border-green-200 text-green-800';
+            case 'warning': return 'bg-red-50 border-red-200 text-red-800';
+            default: return 'bg-gray-50 border-gray-200 text-gray-800';
+        }
+    };
+    
+    // Utility for changing side
+    const handleSideChange = (side: 'auto' | 'left' | 'right') => {
+        setAnalysisSide(side);
+        // Restart session to clear any ongoing calibration that might be stuck
+        if (isActive) {
+            stopSession(false, false); 
+            setTimeout(startCamera, 500); // Restart analysis after a slight delay
+        }
+    };
+
+    // --- Render Side Toggle UI ---
+    const SideToggleButton = (
+        <div className="flex items-center space-x-2 bg-gray-100 p-2 rounded-xl shadow-inner">
+            <span className="text-sm font-medium text-gray-700">Analyze Side:</span>
+            
+            {/* Auto Button */}
+            <button
+                onClick={() => handleSideChange('auto')}
+                className={`px-3 py-1 rounded-lg text-sm font-semibold transition ${
+                    analysisSide === 'auto' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-blue-50'
+                }`}
+            >
+                Auto
+            </button>
+            
+            {/* Left Button */}
+            <button
+                onClick={() => handleSideChange('left')}
+                className={`px-3 py-1 rounded-lg text-sm font-semibold transition ${
+                    analysisSide === 'left' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-blue-50'
+                }`}
+            >
+                Left
+            </button>
+            
+            {/* Right Button */}
+            <button
+                onClick={() => handleSideChange('right')}
+                className={`px-3 py-1 rounded-lg text-sm font-semibold transition ${
+                    analysisSide === 'right' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-blue-50'
+                }`}
+            >
+                Right
+            </button>
+        </div>
+    );
+    // ---------------------------
+
+    // --- Final Completion Modal Component ---
+    if (showCompletionModal) {
+        return (
+            <div className="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 p-4">
+                <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md text-center transform transition-all duration-300 scale-100">
+                    <Award className="w-16 h-16 text-yellow-500 mx-auto mb-4 animate-bounce" />
+                    <h2 className="text-3xl font-bold text-green-700 mb-2">
+                        🎉 HURRAYYY! EXERCISE COMPLETE! 🎉
+                    </h2>
+                    <p className="text-gray-700 mb-6">
+                        You successfully finished all **{exercise.sets} sets** of **{exercise.name}**!
+                        Your discipline is a key step toward recovery.
+                    </p>
+                    <div className="bg-green-50 rounded-xl p-4 mb-6">
+                        <p className="font-semibold text-lg text-green-800">
+                            Total Sets Completed: {setsCompleted} / {exercise.sets}
+                        </p>
+                    </div>
+                    <button
+                        onClick={onComplete}
+                        className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 transition-all"
+                    >
+                        Return to Dashboard
+                    </button>
+                </div>
+            </div>
+        );
+    }
+    // ------------------------------------
+
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-blue-50 py-8">
@@ -366,15 +513,15 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
                     <div className="flex items-center justify-between mb-8">
                         <div>
                             <h1 className="text-3xl font-bold text-gray-900 mb-2">
-                                {exercise.name}
+                                {exercise.name} (Set {setsCompleted + 1} of {exercise.sets})
                             </h1>
                             <p className="text-gray-600">{exercise.description}</p>
+                            {/* NEW: Display the side toggle next to the exercise title */}
+                            <div className="mt-2">{SideToggleButton}</div>
                         </div>
                         <button
-                            // Calls stopSession but does NOT save, then calls onComplete to leave page
                             onClick={() => {
-                                stopSession(false);
-                                onComplete();
+                                stopSession(false, true); 
                             }} 
                             className="bg-gray-100 text-gray-700 px-6 py-3 rounded-lg font-medium hover:bg-gray-200 transition-all"
                         >
@@ -384,6 +531,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
 
                     <div className="grid lg:grid-cols-2 gap-8">
                         <div>
+                            {/* Image/Video Display */}
                             <div className="relative bg-gray-900 rounded-xl overflow-hidden aspect-video">
                                 {/* Video element shows the live stream */}
                                 <video
@@ -421,23 +569,45 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
                                 )}
                             </div>
 
-                            {error && (
-                                <div className="mt-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm flex items-center">
-                                    <AlertCircle className="w-5 h-5 mr-2" />
-                                    {error}
-                                </div>
-                            )}
+                            {/* NEW: GIF Display and Error */}
+                            <div className="mt-4">
+                                {error && (
+                                    <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm flex items-center">
+                                        <AlertCircle className="w-5 h-5 mr-2" />
+                                        {error}
+                                    </div>
+                                )}
+                                {/* Instruction/GIF AREA */}
+                                {!isActive && (
+                                    <div className="bg-gray-50 rounded-xl p-4 text-center">
+                                        <h3 className="font-bold text-gray-800 mb-2">Reference Form</h3>
+                                        <p className="text-sm text-gray-600 mb-3">Ensure your body matches the form before starting.</p>
+                                        
+                                        {/* Placeholder for the GIF */}
+                                        <img 
+                                            src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExOHpjaHdvNWd6d2M4dmM5aWpsbmJkdzIzY2w1NmI3M28yM2d0czEwMyZlcD12MV9pbnRlcm5hbF9naWYmY3Q9Zw/k39hF3Q7aV6I/giphy.gif" 
+                                            alt="Shoulder Flexion Exercise GIF" 
+                                            className="w-48 h-48 object-contain mx-auto rounded-lg shadow-md"
+                                            onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = "https://placehold.co/192x192/4488ff/ffffff?text=EXERCISE+GIF"; }}
+                                        />
+                                        <p className="text-xs text-gray-500 mt-2">Example: Shoulder Flexion (Side View)</p>
+                                    </div>
+                                )}
+                            </div>
 
                             {isActive && (
                                 <button
-                                    // Stops the session and saves the results
-                                    onClick={() => stopSession(true)}
+                                    onClick={() => stopSession(true, true)}
                                     className="mt-4 w-full bg-red-600 text-white py-3 rounded-lg font-medium hover:bg-red-700 transition-all inline-flex items-center justify-center"
                                 >
                                     <StopCircle className="w-5 h-5 mr-2" />
                                     Stop Session & Save
                                 </button>
                             )}
+                            <div className="mt-4 text-sm text-gray-500 text-center">
+                                {isActive && `Sets: ${setsCompleted} / ${exercise.sets}`}
+                                {isActive && reps > 0 && ` | Auto-save if paused for ${PAUSE_TIMEOUT_MS / 1000} seconds`}
+                            </div>
                         </div>
 
                         <div className="space-y-6">
@@ -475,7 +645,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
                                     </div>
                                     <div className="flex justify-between">
                                         <span className="text-gray-600">Sets:</span>
-                                        <span className="font-medium">{exercise.sets}</span>
+                                        <span className="font-medium">{setsCompleted} / {exercise.sets}</span>
                                     </div>
                                     <div className="flex justify-between">
                                         <span className="text-gray-600">Rest Time:</span>
@@ -506,25 +676,19 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
                                 </div>
                             </div>
 
-                            {reps >= exercise.target_reps && (
+                            {reps >= exercise.target_reps && setsCompleted < exercise.sets && (
                                 <div className="bg-green-50 border-2 border-green-200 rounded-xl p-6 text-center">
                                     <div className="text-2xl font-bold text-green-800 mb-2">
-                                        Set Complete!
+                                        YES! Set {setsCompleted + 1} Complete!
                                     </div>
                                     <p className="text-green-700 mb-4">
-                                        Great job! Take a {exercise.rest_seconds} second rest.
+                                        Great job! Take a {exercise.rest_seconds} second rest before Set {setsCompleted + 2}.
                                     </p>
                                     <button
-                                        // This button means the user acknowledges the rest and starts the next set, 
-                                        // but the results of the *completed* set should have already been saved by stopSession(true)
-                                        onClick={() => {
-                                            setReps(0);
-                                            // Reset the ref state to initial values
-                                            sessionStateRef.current = { reps: 0, stage: 'down', angle: 0, last_rep_time: 0 };
-                                        }}
+                                        onClick={handleSetCompletion}
                                         className="bg-green-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-green-700 transition-all"
                                     >
-                                        Start Next Set
+                                        Start Next Set ({setsCompleted + 1} / {exercise.sets})
                                     </button>
                                 </div>
                             )}
