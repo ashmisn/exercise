@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
-     "start": "serve -s dist -l $PORT" 
+     "start": "npx serve -s dist -l $PORT"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
