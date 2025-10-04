@@ -537,4 +537,3 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         </div>
     );
 };
-```
