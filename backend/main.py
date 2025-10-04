@@ -20,15 +20,21 @@ import os
 # 1. MEDIAPIPE & FASTAPI SETUP
 # =========================================================================
 mp_pose = mp.solutions.pose
-# 🚨 REMOVED GLOBAL 'pose' OBJECT 🚨
-# pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
+# ✅ CHANGE 1: REVERT TO GLOBAL 'pose' OBJECT for performance/stability.
+pose = mp_pose.Pose(
+    min_detection_confidence=0.5,
+    min_tracking_confidence=0.5
+)
 
 app = FastAPI(title="AI Physiotherapy API")
 
 # Configure CORS middleware
+# ✅ CHANGE 2: Explicitly include the frontend's origin for robustness against 
+# proxy/infrastructure issues on Render, alongside the wildcard.
+FRONTEND_ORIGIN = "https://exercise-frontend-tt5l.onrender.com"
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*", FRONTEND_ORIGIN], # Including both '*' and the specific URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -40,7 +46,7 @@ IN_MEMORY_DB = {}
 
 
 # =========================================================================
-# 2. DATA MODELS & CONFIGURATION
+# 2. DATA MODELS & CONFIGURATION (No change)
 # =========================================================================
 class Landmark2D(BaseModel):
     x: float
@@ -80,7 +86,7 @@ EXERCISE_PLANS = {
 }
 
 # =========================================================================
-# 3. UTILITY FUNCTIONS (Condensed for brevity, assumed correct)
+# 3. UTILITY FUNCTIONS (No change)
 # =========================================================================
 def get_best_side(landmarks):
     left_vis = (landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].visibility + landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].visibility) / 2
@@ -114,7 +120,7 @@ def get_landmark_indices(side: str):
     return {"HIP": mp_pose.PoseLandmark.LEFT_HIP.value if is_left else mp_pose.PoseLandmark.RIGHT_HIP.value, "SHOULDER": mp_pose.PoseLandmark.LEFT_SHOULDER.value if is_left else mp_pose.PoseLandmark.RIGHT_SHOULDER.value, "ELBOW": mp_pose.PoseLandmark.LEFT_ELBOW.value if is_left else mp_pose.PoseLandmark.RIGHT_ELBOW.value, "WRIST": mp_pose.PoseLandmark.LEFT_WRIST.value if is_left else mp_pose.PoseLandmark.RIGHT_WRIST.value, "KNEE": mp_pose.PoseLandmark.LEFT_KNEE.value if is_left else mp_pose.PoseLandmark.RIGHT_KNEE.value, "ANKLE": mp_pose.PoseLandmark.LEFT_ANKLE.value if is_left else mp_pose.PoseLandmark.RIGHT_ANKLE.value, "FOOT_INDEX": mp_pose.PoseLandmark.LEFT_FOOT_INDEX.value if is_left else mp_pose.PoseLandmark.RIGHT_FOOT_INDEX.value, "INDEX": mp_pose.PoseLandmark.LEFT_INDEX.value if is_left else mp_pose.PoseLandmark.RIGHT_INDEX.value,}
 
 # =========================================================================
-# 4. EXERCISE ANALYSIS FUNCTIONS (Condensed for brevity, assumed correct)
+# 4. EXERCISE ANALYSIS FUNCTIONS (No change)
 # =========================================================================
 def analyze_shoulder_flexion(landmarks, side: str):
     indices = get_landmark_indices(side)
@@ -175,7 +181,7 @@ ANALYSIS_MAP = {
 }
 
 # =========================================================================
-# 5. API ENDPOINTS (analyze_frame, save_session, get_progress - Unchanged logic)
+# 5. API ENDPOINTS
 # =========================================================================
 @app.get("/")
 def root():
@@ -190,17 +196,13 @@ def get_exercise_plan(request: AilmentRequest):
 
 @app.post("/api/analyze_frame")
 def analyze_frame(request: FrameRequest):
-    # 🌟 CRITICAL CHANGE: Initialize MediaPipe Pose locally for each request
-    pose = mp_pose.Pose(
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5
-    )
+    # ⚠️ We must rely on the global 'pose' object for performance stability.
+    global pose 
     
     reps, stage, last_rep_time = 0, "down", 0
     angle, angle_coords, feedback, accuracy = 0, {}, [], 0.0
     DEFAULT_STATE = {"reps": 0, "stage": "down", "last_rep_time": 0, "dynamic_max_angle": 0, "dynamic_min_angle": 180, "frame_count": 0, "partial_rep_buffer": 0.0, "analysis_side": None}
     
-    # Using dictionary merge for cleaner state initialization
     current_state = {**DEFAULT_STATE, **(request.previous_state or {})}
     reps = current_state["reps"]
     stage = current_state["stage"]
@@ -210,7 +212,6 @@ def analyze_frame(request: FrameRequest):
     frame_count = current_state["frame_count"]
     partial_rep_buffer = current_state["partial_rep_buffer"]
     analysis_side = current_state["analysis_side"]
-
 
     try:
         header, encoded = request.frame.split(',', 1) if ',' in request.frame else ('', request.frame)
@@ -222,8 +223,6 @@ def analyze_frame(request: FrameRequest):
             return {"reps": reps, "feedback": [{"type": "warning", "message": "Video stream data corrupted."}], "accuracy_score": 0.0, "state": current_state, "drawing_landmarks": [], "current_angle": 0, "angle_coords": {}}
 
         image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        
-        # 🌟 Use the locally created 'pose' object
         results = pose.process(image_rgb)
         
         landmarks = None
@@ -295,14 +294,20 @@ def analyze_frame(request: FrameRequest):
         return {"reps": reps, "feedback": feedback if feedback else [{"type": "progress", "message": "Processing..."}], "accuracy_score": round(final_accuracy_display, 2), "state": new_state, "drawing_landmarks": drawing_landmarks, "current_angle": round(angle, 1), "angle_coords": angle_coords, "min_angle": round(dynamic_min_angle, 1), "max_angle": round(dynamic_max_angle, 1), "side": analysis_side}
 
     except Exception as e:
-        print(f"CRITICAL ERROR in analyze_frame: {e}")
+        # Crucial for catching the intermittent MediaPipe timestamp error 
+        # and preventing the server from crashing into a 502 error state.
+        error_detail = str(e)
+        if "Packet timestamp mismatch" in error_detail or "CalculatorGraph::Run() failed" in error_detail:
+             print(f"Handled MediaPipe Timestamp Error: {error_detail}")
+             # Return a temporary error message that allows the client to retry
+             raise HTTPException(status_code=400, detail="Transient analysis error. Please try again.")
+        
+        print(f"CRITICAL ERROR in analyze_frame: {error_detail}")
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Unexpected server error during analysis: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Unexpected server error during analysis: {error_detail}")
+    # 🚫 NO 'finally: pose.close()' because the 'pose' object is global
     
-    # 🌟 CRITICAL CHANGE: Explicitly close the object to free up MediaPipe's resources
-    finally:
-        pose.close()
-
+# ... (rest of the API endpoints remain unchanged)
 @app.post("/api/save_session")
 def save_session(data: SessionData):
     if data.user_id not in IN_MEMORY_DB: IN_MEMORY_DB[data.user_id] = []
@@ -342,7 +347,7 @@ def get_progress(user_id: str):
 
 
 # =========================================================================
-# 6. PDF REPORT GENERATION UTILITIES
+# 6. PDF REPORT GENERATION UTILITIES (No change)
 # =========================================================================
 
 def weekly_activity_html(weekly_data):
@@ -434,7 +439,7 @@ def generate_pdf_report(user_id: str):
 
 
 # =========================================================================
-# 7. PDF REPORT API ENDPOINT
+# 7. PDF REPORT API ENDPOINT (No change)
 # =========================================================================
 
 @app.get("/api/pdf/{user_id}")
@@ -450,10 +455,8 @@ def download_progress_report(user_id: str):
 
 
 # =========================================================================
-# 8. MAIN EXECUTION
+# 8. MAIN EXECUTION (No change)
 # =========================================================================
 if __name__ == "__main__":
     import uvicorn
-    # Note: To see the 'pose' object changes in action, you must restart
-    # your backend server.
     uvicorn.run(app, host="0.0.0.0", port=8000)
