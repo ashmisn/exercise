@@ -102,7 +102,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
     
     // ✅ Audio Map: Keys must be EXACTLY what the system needs to play.
     const audioMap = useMemo(() => ({
-        "Hai,Iam Mia i am here to assist you.": new Audio("/audio/into.mp3"),
+        "Hai,Iam Mia i am here to assist you.": new Audio("/audio/intro.mp3"),
         "No pose detected. Adjust your camera view.": new Audio("/audio/no_pose.mp3"),
         "I can't see you clearly. Please adjust your position.": new Audio("/audio/low_visibility.mp3"),
         "Please turn sideways or expose one full side.": new Audio("/audio/side_not_visible.mp3"),
