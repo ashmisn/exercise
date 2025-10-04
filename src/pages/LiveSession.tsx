@@ -163,9 +163,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
 
     // --- GIF MAP (Matching backend exercise names) ---
     const EXERCISE_GIF_MAP: { [key: string]: string } = {
-        "shoulder flexion": "/gifs/standing-shoulder-flexion.gif",
-        "shoulder abduction": "/gifs/standing-shoulder-abduction.gif",
-        "elbow flexion": "/gifs/seated-elbow-flexion.gif",
+        "shoulder flexion": "/standing-shoulder-flexion.gif",
+        "shoulder abduction": "/standing-shoulder-abduction.gif",
+        "elbow flexion": "/seated-elbow-flexion.gif",
         "elbow extension": "/gifs/seated-elbow-extension.gif",
         "shoulder internal rotation": "/gifs/shoulder-internal-rotation.gif",
         "knee flexion": "/gifs/supine-knee-flexion.giff",
