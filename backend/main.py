@@ -48,14 +48,14 @@ SUPABASE_KEY = os.environ.get("VITE_SUPABASE_ANON_KEY")
 
 # Initialize Supabase client globally
 try:
-    if SUPABASE_URL == "YOUR_SUPABASE_URL_HERE" or SUPABASE_KEY == "YOUR_SUPABASE_KEY_HERE":
-        print("⚠️ WARNING: Using placeholder Supabase credentials. Sessions will fail unless environment variables are set.")
-    
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    print("Supabase client initialized.")
+    if SUPABASE_URL == "YOUR_SUPABASE_URL_HERE" or SUPABASE_KEY == "YOUR_SUPABASE_KEY_HERE":
+        print("⚠️ WARNING: Using placeholder Supabase credentials. Sessions will fail unless environment variables are set.")
+    
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    print("Supabase client initialized.")
 except Exception as e:
-    print(f"CRITICAL SUPABASE INIT ERROR: {e}")
-    # In a real app, you might want to stop startup if the DB connection fails
+    print(f"CRITICAL SUPABASE INIT ERROR: {e}")
+    # In a real app, you might want to stop startup if the DB connection fails
 # ---------------------------------------------------------------------
 
 
@@ -63,26 +63,26 @@ except Exception as e:
 # 2. DATA MODELS & CONFIGURATION (Unchanged)
 # =========================================================================
 class Landmark2D(BaseModel):
-    x: float
-    y: float
-    visibility: float = 1.0
+    x: float
+    y: float
+    visibility: float = 1.0
 
 class FrameRequest(BaseModel):
-    frame: str
-    exercise_name: str
-    previous_state: Dict | None = None
+    frame: str
+    exercise_name: str
+    previous_state: Dict | None = None
 
 class AilmentRequest(BaseModel):
-    ailment: str
+    ailment: str
 
 class SessionData(BaseModel):
     # The SessionData model must align with your Supabase table columns
-    user_id: str
-    exercise_name: str
-    reps_completed: int
-    accuracy_score: float
-    # Note: duration_seconds and feedback fields are likely needed in the final system,
-    # but based on the provided data model, we'll stick to these four for now.
+    user_id: str
+    exercise_name: str
+    reps_completed: int
+    accuracy_score: float
+    # Note: duration_seconds and feedback fields are likely needed in the final system,
+    # but based on the provided data model, we'll stick to these four for now.
 
 
 EXERCISE_CONFIGS = {
@@ -333,95 +333,95 @@ def analyze_frame(request: FrameRequest):
 
 @app.post("/api/save_session")
 async def save_session(data: SessionData):
-    """Saves session data to the 'user_sessions' table in Supabase."""
-    try:
-        # Prepare data record, aligning column names to your Supabase schema (user_sessions)
-        session_record = {
-            "user_id": data.user_id,
-            "exercise_name": data.exercise_name,
-            "reps_completed": data.reps_completed,
-            "accuracy_score": data.accuracy_score,
-            # Supabase usually handles 'created_at' and 'session_date' (if date type) automatically,
-            # but we explicitly pass them for reliability and to match the old progress logic.
-            "session_date": dt.now().strftime("%Y-%m-%d"), 
-        }
+    """Saves session data to the 'user_sessions' table in Supabase."""
+    try:
+        # Prepare data record, aligning column names to your Supabase schema (user_sessions)
+        session_record = {
+            "user_id": data.user_id,
+            "exercise_name": data.exercise_name,
+            "reps_completed": data.reps_completed,
+            "accuracy_score": data.accuracy_score,
+            # Supabase usually handles 'created_at' and 'session_date' (if date type) automatically,
+            # but we explicitly pass them for reliability and to match the old progress logic.
+            "session_date": dt.now().strftime("%Y-%m-%d"), 
+        }
 
-        # Insert into Supabase (Ensure your table name is correct: 'user_sessions' or 'user_sessions')
-        response = supabase.table("user_sessions").insert([session_record]).execute()
-        
-        # Check for errors returned by the Supabase client
-        if response.error:
-            print(f"SUPABASE INSERT ERROR: {response.error.message}")
-            raise HTTPException(
-                status_code=500, 
-                detail=f"Database insert failed. Check RLS policies or Foreign Key constraints. Error: {response.error.message}"
-            )
+        # Insert into Supabase (Ensure your table name is correct: 'user_sessions' or 'user_sessions')
+        response = supabase.table("user_sessions").insert([session_record]).execute()
+        
+        # Check for errors returned by the Supabase client
+        if response.error:
+            print(f"SUPABASE INSERT ERROR: {response.error.message}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Database insert failed. Check RLS policies or Foreign Key constraints. Error: {response.error.message}"
+            )
 
-        print(f"SUPABASE WRITE: Saved {data.reps_completed} reps for user {data.user_id}")
-        return {"message": "Session saved successfully"}
+        print(f"SUPABASE WRITE: Saved {data.reps_completed} reps for user {data.user_id}")
+        return {"message": "Session saved successfully"}
 
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Server error during session save: {str(e)}")
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Server error during session save: {str(e)}")
 
 @app.get("/api/progress/{user_id}")
 async def get_progress(user_id: str):
-    """Fetches and aggregates progress data from Supabase for a given user."""
-    try:
-        # Fetch all relevant sessions for the user, ordering by creation time
-        response = supabase.table("user_sessions")\
-            .select("exercise_name, reps_completed, accuracy_score, created_at, session_date")\
-            .eq("user_id", user_id)\
-            .order("created_at", desc=True)\
-            .execute()
-            
-        sessions = response.data
-        
-        # If no data is found, return the empty structure
-        if not sessions: 
-            return {"user_id": user_id, "total_sessions": 0, "total_reps": 0, "average_accuracy": 0.0, "streak_days": 0, "weekly_data": [{"day": day, "reps": 0, "accuracy": 0.0} for day in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]], "recent_sessions": []}
+    """Fetches and aggregates progress data from Supabase for a given user."""
+    try:
+        # Fetch all relevant sessions for the user, ordering by creation time
+        response = supabase.table("user_sessions")\
+            .select("exercise_name, reps_completed, accuracy_score, created_at, session_date")\
+            .eq("user_id", user_id)\
+            .order("created_at", desc=True)\
+            .execute()
+            
+        sessions = response.data
+        
+        # If no data is found, return the empty structure
+        if not sessions: 
+            return {"user_id": user_id, "total_sessions": 0, "total_reps": 0, "average_accuracy": 0.0, "streak_days": 0, "weekly_data": [{"day": day, "reps": 0, "accuracy": 0.0} for day in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]], "recent_sessions": []}
 
-        # --- Aggregate Logic (Using fetched data) ---
-        total_sessions = len(sessions)
-        total_reps = sum(s['reps_completed'] for s in sessions)
-        # Calculate weighted average accuracy
-        average_accuracy = sum(s['reps_completed'] * s['accuracy_score'] for s in sessions) / total_reps if total_reps > 0 else 0.0
+        # --- Aggregate Logic (Using fetched data) ---
+        total_sessions = len(sessions)
+        total_reps = sum(s['reps_completed'] for s in sessions)
+        # Calculate weighted average accuracy
+        average_accuracy = sum(s['reps_completed'] * s['accuracy_score'] for s in sessions) / total_reps if total_reps > 0 else 0.0
 
-        recent_sessions = sessions[:5]
+        recent_sessions = sessions[:5]
 
-        weekly_map = {day: {"reps": 0, "accuracy_sum": 0, "count": 0} for day in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]}
-        
-        for session in sessions:
-            try:
-                # Use the 'created_at' timestamp (ISO format from Supabase) for day calculation
-                date_obj = dt.fromisoformat(session['created_at']) 
-                day_name = date_obj.strftime('%a')
-                if day_name in weekly_map:
-                    weekly_map[day_name]['reps'] += session['reps_completed']
-                    weekly_map[day_name]['accuracy_sum'] += session['accuracy_score']
-                    weekly_map[day_name]['count'] += 1
-            except ValueError:
-                # Skip session if timestamp parsing fails
-                continue
+        weekly_map = {day: {"reps": 0, "accuracy_sum": 0, "count": 0} for day in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]}
+        
+        for session in sessions:
+            try:
+                # Use the 'created_at' timestamp (ISO format from Supabase) for day calculation
+                date_obj = dt.fromisoformat(session['created_at']) 
+                day_name = date_obj.strftime('%a')
+                if day_name in weekly_map:
+                    weekly_map[day_name]['reps'] += session['reps_completed']
+                    weekly_map[day_name]['accuracy_sum'] += session['accuracy_score']
+                    weekly_map[day_name]['count'] += 1
+            except ValueError:
+                # Skip session if timestamp parsing fails
+                continue
 
-        weekly_data = []
-        for day_name in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]:
-            data = weekly_map[day_name]
-            weekly_data.append({"day": day_name, "reps": data['reps'], "accuracy": round(data['accuracy_sum'] / data['count'], 1) if data['count'] > 0 else 0.0})
+        weekly_data = []
+        for day_name in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]:
+            data = weekly_map[day_name]
+            weekly_data.append({"day": day_name, "reps": data['reps'], "accuracy": round(data['accuracy_sum'] / data['count'], 1) if data['count'] > 0 else 0.0})
 
-        return {
-            "user_id": user_id, 
-            "total_sessions": total_sessions, 
-            "total_reps": total_reps, 
-            "average_accuracy": round(average_accuracy, 1), 
-            "streak_days": 0, # Requires more complex logic, left at 0 for now
-            "weekly_data": weekly_data, 
-            "recent_sessions": [{"date": s['session_date'], "exercise": s['exercise_name'], "reps": s['reps_completed'], "accuracy": round(s['accuracy_score'], 1)} for s in recent_sessions]
-        }
+        return {
+            "user_id": user_id, 
+            "total_sessions": total_sessions, 
+            "total_reps": total_reps, 
+            "average_accuracy": round(average_accuracy, 1), 
+            "streak_days": 0, # Requires more complex logic, left at 0 for now
+            "weekly_data": weekly_data, 
+            "recent_sessions": [{"date": s['session_date'], "exercise": s['exercise_name'], "reps": s['reps_completed'], "accuracy": round(s['accuracy_score'], 1)} for s in recent_sessions]
+        }
 
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Server error fetching progress: {str(e)}")
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Server error fetching progress: {str(e)}")
 
 
 # =========================================================================
@@ -535,10 +535,10 @@ def download_progress_report(user_id: str):
 
 
 # =========================================================================
-# 9. CHAT ENDPOINT (Unchanged)
+# 9. CHAT ENDPOINT (Updated)
 # =========================================================================
 class ChatRequest(BaseModel):
-    message: str   
+    message: str  
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
@@ -557,6 +557,12 @@ async def chat(request: ChatRequest):
             "correct": "To ensure correct form: 1) Move slowly and deliberately 2) Maintain proper posture 3) Breathe naturally - don't hold your breath 4) Stay within pain-free range 5) Use a mirror to check alignment 6) Focus on quality over quantity.",
             "warm": "Always warm up before exercises! Do 5-10 minutes of light cardio like walking. Gentle arm circles help warm up shoulders. This increases blood flow and reduces injury risk.",
             "progress": "Track your progress by: 1) Noting pain levels (should decrease over time) 2) Range of motion improvements 3) Number of reps completed 4) Daily activities becoming easier. Progress takes time - be patient!",
+            # --- NEW RESPONSES ---
+            "set": "The target sets and reps in your plan are a guide. Listen to your body. If you can complete the target with good form, aim for it! If not, reduce the number and focus on perfect technique.",
+            "hydration": "Don't forget to stay **hydrated**! Proper fluid intake supports muscle function, aids recovery, and helps reduce stiffness. Drink water before, during, and after your session.",
+            "modify": "If an exercise feels too easy or causes mild pain, it might be time to **modify** it. You can increase reps, sets, or hold the end position longer. **Always consult your physical therapist** before making major changes.",
+            "how long": "Rehabilitation length varies based on the injury's severity and your body's response. Typical plans are **4-8 weeks**, but consistent, gradual effort is more important than rushing the process.",
+            # --- END NEW RESPONSES ---
         }
 
         # Check if the message contains any keyword
@@ -566,7 +572,7 @@ async def chat(request: ChatRequest):
 
         # Default fallback response
         return {
-            "response": "I'm here to help with your rehabilitation exercises! You can ask me about:\n\n• Exercise techniques (shoulder, elbow, wrist)\n• Pain management\n• Exercise frequency and rest days\n• Proper form and technique\n• Progress tracking\n• Warm-up routines\n\nWhat would you like to know?"
+            "response": "I'm here to help with your rehabilitation exercises! You can ask me about:\n\n• Exercise techniques (shoulder, elbow, wrist)\n• Pain management\n• Exercise frequency and rest days\n• Proper form and technique\n• Progress tracking\n• Warm-up routines\n• Sets and Reps\n• Hydration\n\nWhat would you like to know?"
         }
 
     except Exception as e:
