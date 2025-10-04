@@ -91,7 +91,7 @@ export const Progress: React.FC = () => {
         setFetchError(null);
         
         try {
-            const response = await fetch(`https://exercise-frontend-tt5l.onrender.com/api/progress/${userId}`);
+            const response = await fetch(`https://exercise-7edj.onrender.com/api/progress/${userId}`);
             
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
