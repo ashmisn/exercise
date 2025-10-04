@@ -4,7 +4,7 @@ import numpy as np
 import time
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse # ADDED
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict
 import mediapipe as mp
@@ -12,32 +12,30 @@ import json
 import datetime
 import traceback
 import requests
-from weasyprint import HTML, CSS 
-from datetime import datetime as dt 
-import os # ADDED
+from weasyprint import HTML, CSS
+from datetime import datetime as dt
+import os
 
 # =========================================================================
 # 1. MEDIAPIPE & FASTAPI SETUP
 # =========================================================================
 mp_pose = mp.solutions.pose
-pose = mp_pose.Pose(
-    min_detection_confidence=0.5,
-    min_tracking_confidence=0.5
-)
+# 🚨 REMOVED GLOBAL 'pose' OBJECT 🚨
+# pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
 app = FastAPI(title="AI Physiotherapy API")
 
 # Configure CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # --- REALISM SIMULATION: IN-MEMORY DATABASE (Simulates persistence) ---
-IN_MEMORY_DB = {} 
+IN_MEMORY_DB = {}
 # ---------------------------------------------------------------------
 
 
@@ -50,14 +48,14 @@ class Landmark2D(BaseModel):
     visibility: float = 1.0
 
 class FrameRequest(BaseModel):
-    frame: str 
+    frame: str
     exercise_name: str
     previous_state: Dict | None = None
 
 class AilmentRequest(BaseModel):
     ailment: str
 
-class SessionData(BaseModel): 
+class SessionData(BaseModel):
     user_id: str
     exercise_name: str
     reps_completed: int
@@ -127,12 +125,12 @@ def analyze_shoulder_flexion(landmarks, side: str):
     angle_coords = {"A": {"x": P_HIP[0], "y": P_HIP[1]}, "B": {"x": P_SHOULDER[0], "y": P_SHOULDER[1]}, "C": {"x": P_ELBOW[0], "y": P_ELBOW[1]},}
     return angle, angle_coords, []
 def analyze_shoulder_abduction(landmarks, side: str): return analyze_shoulder_flexion(landmarks, side)
-def analyze_shoulder_internal_rotation(landmarks, side: str): 
+def analyze_shoulder_internal_rotation(landmarks, side: str):
     indices = get_landmark_indices(side)
     LM_HIP, LM_ELBOW, LM_WRIST = indices["HIP"], indices["ELBOW"], indices["WRIST"]
     if landmarks[LM_HIP].visibility < 0.5 or landmarks[LM_ELBOW].visibility < 0.5 or landmarks[LM_WRIST].visibility < 0.5: return 0, {}, [{"type": "warning", "message": f"Low visibility for {side} shoulder/elbow/wrist."}]
     P_HIP, P_ELBOW, P_WRIST = [landmarks[LM_HIP].x, landmarks[LM_HIP].y], [landmarks[LM_ELBOW].x, landmarks[LM_ELBOW].y], [landmarks[LM_WRIST].x, landmarks[LM_WRIST].y]
-    angle = calculate_angle_2d(P_HIP, P_ELBOW, P_WRIST) 
+    angle = calculate_angle_2d(P_HIP, P_ELBOW, P_WRIST)
     angle_coords = {"A": {"x": P_HIP[0], "y": P_HIP[1]}, "B": {"x": P_ELBOW[0], "y": P_ELBOW[1]}, "C": {"x": P_WRIST[0], "y": P_WRIST[1]},}
     return angle, angle_coords, []
 def analyze_elbow_flexion(landmarks, side: str):
@@ -144,7 +142,7 @@ def analyze_elbow_flexion(landmarks, side: str):
     angle_coords = {"A": {"x": P_SHOULDER[0], "y": P_SHOULDER[1]}, "B": {"x": P_ELBOW[0], "y": P_ELBOW[1]}, "C": {"x": P_WRIST[0], "y": P_WRIST[1]},}
     return angle, angle_coords, []
 def analyze_elbow_extension(landmarks, side: str): return analyze_elbow_flexion(landmarks, side)
-def analyze_knee_flexion(landmarks, side: str): 
+def analyze_knee_flexion(landmarks, side: str):
     indices = get_landmark_indices(side)
     LM_HIP, LM_KNEE, LM_ANKLE = indices["HIP"], indices["KNEE"], indices["ANKLE"]
     if landmarks[LM_HIP].visibility < 0.5 or landmarks[LM_KNEE].visibility < 0.5 or landmarks[LM_ANKLE].visibility < 0.5: return 0, {}, [{"type": "warning", "message": f"Low visibility for {side} hip/knee/ankle."}]
@@ -152,15 +150,15 @@ def analyze_knee_flexion(landmarks, side: str):
     angle = calculate_angle_2d(P_HIP, P_KNEE, P_ANKLE)
     angle_coords = {"A": {"x": P_HIP[0], "y": P_HIP[1]}, "B": {"x": P_KNEE[0], "y": P_KNEE[1]}, "C": {"x": P_ANKLE[0], "y": P_ANKLE[1]},}
     return angle, angle_coords, []
-def analyze_ankle_dorsiflexion(landmarks, side: str): 
+def analyze_ankle_dorsiflexion(landmarks, side: str):
     indices = get_landmark_indices(side)
     LM_KNEE, LM_ANKLE, LM_FOOT = indices["KNEE"], indices["ANKLE"], indices["FOOT_INDEX"]
     if landmarks[LM_KNEE].visibility < 0.5 or landmarks[LM_ANKLE].visibility < 0.5 or landmarks[LM_FOOT].visibility < 0.5: return 0, {}, [{"type": "warning", "message": f"Low visibility for {side} knee/ankle/foot."}]
     P_KNEE, P_ANKLE, P_FOOT = [landmarks[LM_KNEE].x, landmarks[LM_KNEE].y], [landmarks[LM_ANKLE].x, landmarks[LM_ANKLE].y], [landmarks[LM_FOOT].x, landmarks[LM_FOOT].y]
-    angle = calculate_angle_2d(P_KNEE, P_ANKLE, P_FOOT) 
+    angle = calculate_angle_2d(P_KNEE, P_ANKLE, P_FOOT)
     angle_coords = {"A": {"x": P_KNEE[0], "y": P_KNEE[1]}, "B": {"x": P_ANKLE[0], "y": P_ANKLE[1]}, "C": {"x": P_FOOT[0], "y": P_FOOT[1]},}
     return angle, angle_coords, []
-def analyze_wrist_flexion(landmarks, side: str): 
+def analyze_wrist_flexion(landmarks, side: str):
     indices = get_landmark_indices(side)
     LM_ELBOW, LM_WRIST, LM_FINGER = indices["ELBOW"], indices["WRIST"], indices["INDEX"]
     if landmarks[LM_ELBOW].visibility < 0.5 or landmarks[LM_WRIST].visibility < 0.5 or landmarks[LM_FINGER].visibility < 0.5: return 0, {}, [{"type": "warning", "message": f"Low visibility for {side} elbow/wrist/finger."}]
@@ -170,9 +168,9 @@ def analyze_wrist_flexion(landmarks, side: str):
     return angle, angle_coords, []
 
 ANALYSIS_MAP = {
-    "shoulder flexion": analyze_shoulder_flexion, "shoulder abduction": analyze_shoulder_abduction, 
+    "shoulder flexion": analyze_shoulder_flexion, "shoulder abduction": analyze_shoulder_abduction,
     "shoulder internal rotation": analyze_shoulder_internal_rotation, "elbow flexion": analyze_elbow_flexion,
-    "elbow extension": analyze_elbow_extension, "knee flexion": analyze_knee_flexion, 
+    "elbow extension": analyze_elbow_extension, "knee flexion": analyze_knee_flexion,
     "ankle dorsiflexion": analyze_ankle_dorsiflexion, "wrist flexion": analyze_wrist_flexion,
 }
 
@@ -192,14 +190,27 @@ def get_exercise_plan(request: AilmentRequest):
 
 @app.post("/api/analyze_frame")
 def analyze_frame(request: FrameRequest):
+    # 🌟 CRITICAL CHANGE: Initialize MediaPipe Pose locally for each request
+    pose = mp_pose.Pose(
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5
+    )
+    
     reps, stage, last_rep_time = 0, "down", 0
     angle, angle_coords, feedback, accuracy = 0, {}, [], 0.0
     DEFAULT_STATE = {"reps": 0, "stage": "down", "last_rep_time": 0, "dynamic_max_angle": 0, "dynamic_min_angle": 180, "frame_count": 0, "partial_rep_buffer": 0.0, "analysis_side": None}
-    current_state = request.previous_state or DEFAULT_STATE
-    reps, stage, last_rep_time = current_state.get("reps", 0), current_state.get("stage", "down"), current_state.get("last_rep_time", 0)
-    dynamic_max_angle, dynamic_min_angle = current_state.get("dynamic_max_angle", 0), current_state.get("dynamic_min_angle", 180)
-    frame_count, partial_rep_buffer = current_state.get("frame_count", 0), current_state.get("partial_rep_buffer", 0.0)
-    analysis_side = current_state.get("analysis_side", None)
+    
+    # Using dictionary merge for cleaner state initialization
+    current_state = {**DEFAULT_STATE, **(request.previous_state or {})}
+    reps = current_state["reps"]
+    stage = current_state["stage"]
+    last_rep_time = current_state["last_rep_time"]
+    dynamic_max_angle = current_state["dynamic_max_angle"]
+    dynamic_min_angle = current_state["dynamic_min_angle"]
+    frame_count = current_state["frame_count"]
+    partial_rep_buffer = current_state["partial_rep_buffer"]
+    analysis_side = current_state["analysis_side"]
+
 
     try:
         header, encoded = request.frame.split(',', 1) if ',' in request.frame else ('', request.frame)
@@ -207,10 +218,14 @@ def analyze_frame(request: FrameRequest):
         nparr = np.frombuffer(img_data, np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-        if frame is None or frame.size == 0: return {"reps": reps, "feedback": [{"type": "warning", "message": "Video stream data corrupted."}], "accuracy_score": 0.0, "state": current_state, "drawing_landmarks": [], "current_angle": 0, "angle_coords": {}}
+        if frame is None or frame.size == 0: 
+            return {"reps": reps, "feedback": [{"type": "warning", "message": "Video stream data corrupted."}], "accuracy_score": 0.0, "state": current_state, "drawing_landmarks": [], "current_angle": 0, "angle_coords": {}}
 
         image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
+        # 🌟 Use the locally created 'pose' object
         results = pose.process(image_rgb)
+        
         landmarks = None
         
         if not results.pose_landmarks:
@@ -231,7 +246,7 @@ def analyze_frame(request: FrameRequest):
                         angle, angle_coords, analysis_feedback = analysis_func(landmarks, analysis_side)
                         feedback.extend(analysis_feedback)
                         
-                        if not analysis_feedback: 
+                        if not analysis_feedback:
                             CALIBRATION_FRAMES, DEBOUNCE_TIME = config['calibration_frames'], config['debounce']
                             current_time = time.time()
                             
@@ -240,16 +255,16 @@ def analyze_frame(request: FrameRequest):
                                 dynamic_min_angle = min(dynamic_min_angle, angle)
                                 frame_count += 1
                                 feedback.append({"type": "progress", "message": f"Calibrating range ({frame_count}/{CALIBRATION_FRAMES}). Move fully from start to finish position."})
-                                accuracy = 0.0 
+                                accuracy = 0.0
                                 
                             if frame_count >= CALIBRATION_FRAMES or reps > 0:
                                 CALIBRATED_MIN_ANGLE, CALIBRATED_MAX_ANGLE = dynamic_min_angle, dynamic_max_angle
-                                MIN_ANGLE_THRESHOLD_FULL, MAX_ANGLE_THRESHOLD_FULL = CALIBRATED_MIN_ANGLE + 5, CALIBRATED_MAX_ANGLE - 5 
-                                MIN_ANGLE_THRESHOLD_PARTIAL, MAX_ANGLE_THRESHOLD_PARTIAL = CALIBRATED_MIN_ANGLE + 20, CALIBRATED_MAX_ANGLE - 20 
+                                MIN_ANGLE_THRESHOLD_FULL, MAX_ANGLE_THRESHOLD_FULL = CALIBRATED_MIN_ANGLE + 5, CALIBRATED_MAX_ANGLE - 5
+                                MIN_ANGLE_THRESHOLD_PARTIAL, MAX_ANGLE_THRESHOLD_PARTIAL = CALIBRATED_MIN_ANGLE + 20, CALIBRATED_MAX_ANGLE - 20
                                 frame_accuracy = calculate_accuracy(angle, CALIBRATED_MIN_ANGLE, CALIBRATED_MAX_ANGLE)
-                                accuracy = frame_accuracy 
+                                accuracy = frame_accuracy
 
-                                if angle < MIN_ANGLE_THRESHOLD_PARTIAL: 
+                                if angle < MIN_ANGLE_THRESHOLD_PARTIAL:
                                     stage = "up"
                                     feedback.append({"type": "instruction", "message": "Hold contracted position at the top!" if angle < MIN_ANGLE_THRESHOLD_FULL else "Go deeper for a full rep."})
                                 
@@ -261,11 +276,11 @@ def analyze_frame(request: FrameRequest):
                                             
                                         if rep_amount > 0:
                                             stage, partial_rep_buffer, last_rep_time = "down", partial_rep_buffer + rep_amount, current_time
-                                            if partial_rep_buffer >= 1.0: reps, partial_rep_buffer = reps + int(partial_rep_buffer), partial_rep_buffer % 1.0 
+                                            if partial_rep_buffer >= 1.0: reps, partial_rep_buffer = reps + int(partial_rep_buffer), partial_rep_buffer % 1.0
                                             feedback.append({"type": "encouragement", "message": f"{success_message} Total reps: {reps}"})
                                         else: feedback.append({"type": "warning", "message": "Incomplete return to starting position."})
                                     else: feedback.append({"type": "warning", "message": "Slow down! Ensure controlled return."})
-                                        
+                                    
                                 if not any(f['type'] in ['warning', 'instruction', 'encouragement'] for f in feedback):
                                     if stage == 'up' and angle > MIN_ANGLE_THRESHOLD_FULL: feedback.append({"type": "progress", "message": "Push further to the maximum range."})
                                     elif stage == 'down' and angle < MAX_ANGLE_THRESHOLD_FULL: feedback.append({"type": "progress", "message": "Return fully to the starting position."})
@@ -273,7 +288,7 @@ def analyze_frame(request: FrameRequest):
                                     elif stage == 'up': feedback.append({"type": "progress", "message": "Controlled movement upward."})
                     else: feedback.append({"type": "warning", "message": "Analysis function missing."})
         
-        final_accuracy_display = accuracy 
+        final_accuracy_display = accuracy
         drawing_landmarks = get_2d_landmarks(landmarks) if landmarks else []
         new_state = {"reps": reps, "stage": stage, "angle": round(angle, 1), "last_rep_time": last_rep_time, "dynamic_max_angle": dynamic_max_angle, "dynamic_min_angle": dynamic_min_angle, "frame_count": frame_count, "partial_rep_buffer": partial_rep_buffer, "analysis_side": analysis_side}
 
@@ -281,8 +296,12 @@ def analyze_frame(request: FrameRequest):
 
     except Exception as e:
         print(f"CRITICAL ERROR in analyze_frame: {e}")
-        traceback.print_exc() 
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Unexpected server error during analysis: {str(e)}")
+    
+    # 🌟 CRITICAL CHANGE: Explicitly close the object to free up MediaPipe's resources
+    finally:
+        pose.close()
 
 @app.post("/api/save_session")
 def save_session(data: SessionData):
@@ -328,10 +347,10 @@ def get_progress(user_id: str):
 
 def weekly_activity_html(weekly_data):
     html = ""
-    max_reps = max([d['reps'] for d in weekly_data] + [1])  # avoid div by zero
+    max_reps = max([d['reps'] for d in weekly_data] + [1])
     for day in weekly_data:
         width_percent = (day['reps'] / max_reps) * 100
-        color = "#16a34a" if day['reps'] > 0 else "#d1d5db"  # green or gray
+        color = "#16a34a" if day['reps'] > 0 else "#d1d5db"
         html += f"""
         <div style="margin:5px 0;">
             <strong>{day['day']}:</strong>
@@ -431,8 +450,10 @@ def download_progress_report(user_id: str):
 
 
 # =========================================================================
-# 7. MAIN EXECUTION
+# 8. MAIN EXECUTION
 # =========================================================================
 if __name__ == "__main__":
     import uvicorn
+    # Note: To see the 'pose' object changes in action, you must restart
+    # your backend server.
     uvicorn.run(app, host="0.0.0.0", port=8000)
