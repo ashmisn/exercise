@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { Camera, StopCircle, Play, AlertCircle, Award, RotateCw } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -10,45 +10,19 @@ interface Exercise {
     sets: number;
     rest_seconds: number;
 }
-interface ExercisePlan {
-    ailment: string;
-    exercises: Exercise[];
-}
-interface LiveSessionProps {
-    plan: ExercisePlan;
-    exercise: Exercise;
-    onComplete: () => void;
-}
-// Merged FeedbackItem types for robustness
-interface FeedbackItem {
-    type: 'correction' | 'encouragement' | 'warning' | 'progress'; 
-    message: string;
-}
-interface Landmark {
-    x: number;
-    y: number;
-    visibility: number;
-}
-interface Coordinate {
-    x: number;
-    y: number;
-}
-interface DrawingData {
-    landmarks: Landmark[];
-    angleData?: {
-        angle: number;
-        A: Coordinate;
-        B: Coordinate;
-        C: Coordinate;
-    };
-}
+interface ExercisePlan { ailment: string; exercises: Exercise[]; }
+interface LiveSessionProps { plan: ExercisePlan; exercise: Exercise; onComplete: () => void; }
+interface FeedbackItem { type: 'correction' | 'encouragement' | 'warning' | 'progress'; message: string; }
+interface Landmark { x: number; y: number; visibility: number; }
+interface Coordinate { x: number; y: number; }
+interface DrawingData { landmarks: Landmark[]; angleData?: { angle: number; A: Coordinate; B: Coordinate; C: Coordinate; } }
 
 const POSE_CONNECTIONS: [number, number][] = [
     [11, 12], [11, 13], [13, 15], [15, 17], [15, 19], [15, 21], [17, 19], [12, 14], [14, 16], [16, 18], [16, 20], [16, 22],
     [11, 23], [12, 24], [23, 24], [23, 25], [24, 26], [25, 27], [26, 28], [27, 29], [28, 30], [29, 31], [30, 32], [27, 31], [28, 32]
 ];
 
-// --- DRAWING UTILITY FUNCTION (Merged and fixed syntax errors) ---
+// --- DRAWING UTILITY FUNCTION (Retained fixed version) ---
 const drawLandmarks = (
     ctx: CanvasRenderingContext2D,
     drawingData: DrawingData,
@@ -58,65 +32,32 @@ const drawLandmarks = (
     ctx.clearRect(0, 0, width, height);
     ctx.lineWidth = 4;
     const { landmarks, angleData } = drawingData;
-
-    // 1. Draw Skeleton Lines
-    ctx.strokeStyle = 'rgba(0, 150, 255, 0.9)'; // Aesthetic color
+    ctx.strokeStyle = 'rgba(0, 150, 255, 0.9)';
     POSE_CONNECTIONS.forEach(([i, j]) => {
         const p1 = landmarks[i];
         const p2 = landmarks[j];
-
         if (p1?.visibility > 0.6 && p2?.visibility > 0.6) {
-            ctx.beginPath();
-            ctx.moveTo(p1.x * width, p1.y * height);
-            ctx.lineTo(p2.x * width, p2.y * height);
-            ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(p1.x * width, p1.y * height); ctx.lineTo(p2.x * width, p2.y * height); ctx.stroke();
         }
     });
-
-    // 2. Draw Joints (Circles)
-    ctx.fillStyle = '#FF7F50'; // Aesthetic color
+    ctx.fillStyle = '#FF7F50';
     landmarks.forEach(p => {
-        if (p.visibility > 0.6) {
-            ctx.beginPath();
-            ctx.arc(p.x * width, p.y * height, 6, 0, 2 * Math.PI);
-            ctx.fill();
-        }
+        if (p.visibility > 0.6) { ctx.beginPath(); ctx.arc(p.x * width, p.y * height, 6, 0, 2 * Math.PI); ctx.fill(); }
     });
-
-    // 3. Draw Angle Text
     if (angleData && angleData.angle > 0) {
         const { angle, A, B, C } = angleData;
-
         const center = { x: B.x * width, y: B.y * height };
         const pA = { x: A.x * width, y: A.y * height };
         const pC = { x: C.x * width, y: C.y * height };
-
         const startAngle = Math.atan2(pA.y - center.y, pA.x - center.x);
         const endAngle = Math.atan2(pC.y - center.y, pC.x - center.x);
-
         let start = startAngle < 0 ? startAngle + 2 * Math.PI : startAngle;
         let end = endAngle < 0 ? endAngle + 2 * Math.PI : endAngle;
-
         if (start > end) { [start, end] = [end, start]; }
-
-        // Draw Angle Arc
-        ctx.strokeStyle = '#32CD32';
-        ctx.lineWidth = 5;
-        ctx.beginPath();
-        ctx.arc(center.x, center.y, 40, start, end);
-        ctx.stroke();
-
-        // Draw Angle Text (Fixed syntax error using backticks for template literal)
-        ctx.fillStyle = 'white';
-        ctx.strokeStyle = 'black';
-        ctx.lineWidth = 2;
-        ctx.font = 'bold 24px Arial';
-
-        const textX = center.x + 10;
-        const textY = center.y - 10;
-
-        ctx.strokeText(`${angle.toFixed(0)}°`, textX, textY);
-        ctx.fillText(`${angle.toFixed(0)}°`, textX, textY);
+        ctx.strokeStyle = '#32CD32'; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(center.x, center.y, 40, start, end); ctx.stroke();
+        ctx.fillStyle = 'white'; ctx.strokeStyle = 'black'; ctx.lineWidth = 2; ctx.font = 'bold 24px Arial';
+        const textX = center.x + 10; const textY = center.y - 10;
+        ctx.strokeText(`${angle.toFixed(0)}°`, textX, textY); ctx.fillText(`${angle.toFixed(0)}°`, textX, textY);
     }
 };
 
@@ -143,50 +84,100 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
     const intervalRef = useRef<NodeJs.Timeout | null>(null);
     const PAUSE_TIMEOUT_MS = 5000;
 
-    // --- GIF MAP (Corrected paths to root public folder where necessary) ---
+    // --- GIF MAP (Corrected paths) ---
     const EXERCISE_GIF_MAP: { [key: string]: string } = {
         "shoulder flexion": "/standing-shoulder-flexion.gif",
         "shoulder abduction": "/standing-shoulder-abduction.gif",
         "elbow flexion": "/seated-elbow-flexion.gif",
-        "elbow extension": "/seated-elbow-extension.gif", // Corrected assuming this file is also now at root
-        "shoulder internal rotation": "/shoulder-internal-rotation.gif", // Corrected
-        "knee flexion": "/supine-knee-flexion.gif", // Corrected typo from .giff to .gif
-        "ankle dorsiflexion": "/seated-ankle-dorsiflexion.gif", // Corrected
-        "wrist flexion": "/seated-wrist-flexion.gif", // Corrected
+        "elbow extension": "/seated-elbow-extension.gif",
+        "shoulder internal rotation": "/shoulder-internal-rotation.gif",
+        "knee flexion": "/supine-knee-flexion.gif",
+        "ankle dorsiflexion": "/seated-ankle-dorsiflexion.gif",
+        "wrist flexion": "/seated-wrist-flexion.gif",
     };
+    
+    // --- AUDIO MAP FIX (Using useMemo and CORRECT PATH) ---
+    // ✅ FIX 1: Correctly initialized Audio objects using useMemo and paths from /public/audio_site/
+    const audioMap = useMemo(() => ({
+        "No pose detected. Adjust camera view.": new Audio("/audio_site/no_pose.mp3"),
+        "Low visibility for left shoulder/hip/elbow.": new Audio("/audio_site/low_visibility.mp3"),
+        "Low visibility for right shoulder/hip/elbow.": new Audio("/audio_site/low_visibility.mp3"),
+        "Low visibility for left elbow/wrist/shoulder.": new Audio("/audio_site/low_visibility.mp3"),
+        "Low visibility for right elbow/wrist/shoulder.": new Audio("/audio_site/low_visibility.mp3"),
+        "Low visibility for left shoulder/elbow/wrist.": new Audio("/audio_site/low_visibility.mp3"),
+        "Low visibility for right shoulder/elbow/wrist.": new Audio("/audio_site/low_visibility.mp3"),
+        "Low visibility for left hip/knee/ankle.": new Audio("/audio_site/low_visibility.mp3"),
+        "Low visibility for right hip/knee/ankle.": new Audio("/audio_site/low_visibility.mp3"),
+        "Low visibility for left knee/ankle/foot.": new Audio("/audio_site/low_visibility.mp3"),
+        "Low visibility for right knee/ankle/foot.": new Audio("/audio_site/low_visibility.mp3"),
+        "Low visibility for left elbow/wrist/finger.": new Audio("/audio_site/low_visibility.mp3"),
+        "Low visibility for right elbow/wrist/finger.": new Audio("/audio_site/low_visibility.mp3"),
+        "Please turn sideways or expose one full side.": new Audio("/audio_site/side_not_visible.mp3"),
+        "Incomplete return to starting position.": new Audio("/audio_site/incomplete_return.mp3"),
+        "Slow down! Ensure controlled return.": new Audio("/audio_site/slow_movement.mp3"),
+        "Hold contracted position at the top!": new Audio("/audio_site/hold_top.mp3"),
+        "Go deeper for a full rep.": new Audio("/audio_site/go_deeper.mp3"),
+        "Push further to the maximum range.": new Audio("/audio_site/push_max.mp3"),
+        "Return fully to the starting position.": new Audio("/audio_site/return_full.mp3"),
+        "Ready to start the next rep.": new Audio("/audio_site/next_rep.mp3"),
+        "Controlled movement upward.": new Audio("/audio_site/controlled_up.mp3"),
+        "Calibrating range": new Audio("/audio_site/calibrating.mp3"), // Match "Calibrating range (X/Y).."
+        "FULL Rep Completed! Well done.": new Audio("/audio_site/full_rep.mp3"),
+        "Partial Rep (50%) counted. Complete the movement.": new Audio("/audio_site/partial_rep.mp3"),
+        "Set": new Audio("/audio_site/full_rep.mp3"), // Use 'full_rep' for set completion message
+    }), []); 
+
+
+    // --- AUDIO EFFECT ---
+    // ✅ FIX 2: Implement playback logic based on message content matching the start of the key
+    useEffect(() => {
+        if (feedback.length === 0) return;
+        const latestMessage = feedback[feedback.length - 1].message;
+        
+        // Find the key that matches the start of the message (handles dynamic counters like (X/Y))
+        const matchedKey = Object.keys(audioMap).find(key => latestMessage.startsWith(key));
+        
+        if (matchedKey) {
+            // Stop any currently playing audio before playing the new one
+            Object.values(audioMap).forEach(audio => {
+                if (!audio.paused) {
+                    audio.pause();
+                    audio.currentTime = 0;
+                }
+            });
+            audioMap[matchedKey].play().catch(err => console.warn("Audio play error:", err));
+        }
+    }, [feedback, audioMap]);
+    // ------------------
+
 
     const exerciseKey = exercise.name.toLowerCase();
-    // Fallback to generic GIF if specific one is missing in the map
     const gifSrc = EXERCISE_GIF_MAP[exerciseKey] || "/default-exercise-guide.gif"; 
     const gifDisplayName = exercise.name;
     const gifPlaceholderText = "Image Not Found";
 
 
-    // --- PAUSE/INACTIVITY DETECTOR ---
+    // --- PAUSE/INACTIVITY DETECTOR (Logic maintained) ---
     useEffect(() => {
         let pauseCheckInterval: NodeJS.Timeout | null = null;
-
         if (isActive) {
             pauseCheckInterval = setInterval(() => {
                 const timeSinceLastActivity = Date.now() - lastActivityTime;
-
                 if (timeSinceLastActivity > PAUSE_TIMEOUT_MS && reps > 0 && setsCompleted < exercise.sets) {
                     console.log(`PAUSE DETECTED: Auto-saving session.`);
                     stopSession(true, true);
                 }
             }, 1000);
-
         } else if (pauseCheckInterval) {
             clearInterval(pauseCheckInterval);
         }
-
         return () => {
             if (pauseCheckInterval) clearInterval(pauseCheckInterval);
         };
     }, [isActive, lastActivityTime, reps, setsCompleted, exercise.sets]);
 
 
-    // --- SAVE SESSION ---
+    // --- SAVE SESSION (Logic maintained) ---
     const saveSessionResult = async (finalReps: number, finalAccuracy: number, isAutoSave: boolean) => {
         if (!user?.id) return;
         if (finalReps === 0) return;
@@ -228,12 +219,23 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
             setLastActivityTime(Date.now());
             sessionStateRef.current = data.state;
             if (data.state.analysis_side && analysisSide === 'auto') setAnalysisSide(data.state.analysis_side);
-            setReps(data.reps); setFeedback(data.feedback); setAccuracy(data.accuracy_score);
+            
+            // ✅ Reps updated here: This ensures the UI reflects the count
+            setReps(data.reps); 
+            setFeedback(data.feedback); 
+            setAccuracy(data.accuracy_score);
+            
             setDrawingData({
                 landmarks: data.drawing_landmarks,
                 angleData: { angle: data.current_angle, A: data.angle_coords.A, B: data.angle_coords.B, C: data.angle_coords.C }
             });
-            if (data.reps >= exercise.target_reps) stopSession(false, false);
+            
+            // ✅ FIX 3: Check for set completion and trigger the transition
+            if (data.reps >= exercise.target_reps && setsCompleted < exercise.sets) {
+                 // Trigger set completion without saving/stopping the camera prematurely
+                 handleSetCompletion(true); 
+            }
+
         } catch (err) { console.error('Analysis error:', err); setError('Connection or Analysis Error.'); setDrawingData(null); }
     };
 
@@ -251,7 +253,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
     };
 
 
-    // --- START CAMERA ---
+    // --- START CAMERA (Logic maintained) ---
     const startCamera = async () => {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
@@ -263,24 +265,46 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
     };
 
     // --- HANDLE SET COMPLETION ---
-    const handleSetCompletion = () => {
-        saveSessionResult(reps, accuracy, false);
+    // ✅ FIX 4: Corrected set completion logic for next set button to appear
+    const handleSetCompletion = (fromAnalysis: boolean = false) => {
+        if (!fromAnalysis) {
+             // Only save if called from a button, if called from analysis it saves implicitly later
+             saveSessionResult(reps, accuracy, false); 
+        }
+
         const nextSetsCompleted = setsCompleted + 1;
 
-        if (nextSetsCompleted >= exercise.sets) {
-            stopSession(false, false);
+        // Stop the analysis interval immediately if it came from the analysis loop
+        if (intervalRef.current && fromAnalysis) {
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
+            setIsActive(false); // Stop processing, wait for the user to click "Next Set"
             setSetsCompleted(nextSetsCompleted);
+            
+            // Play a set completion sound
+            const completionMessage = "Set"; 
+            audioMap[completionMessage].play().catch(err => console.warn("Set completion audio error:", err));
+        }
+
+        if (nextSetsCompleted >= exercise.sets) {
+            // All sets done: stop everything
+            if(!fromAnalysis) stopSession(false, false);
             setShowCompletionModal(true);
-        } else {
+        } else if (!fromAnalysis) {
+            // Start next set immediately if triggered by the "Start Next Set" button
             setSetsCompleted(nextSetsCompleted);
             setReps(0);
             setFeedback([]);
             sessionStateRef.current = { reps: 0, stage: 'down', angle: 0, last_rep_time: 0 };
             startCamera();
+        } else {
+             // If fromAnalysis is true, we just exit, letting the JSX render the "Start Next Set" button
+             // and waiting for the user interaction.
         }
     };
 
-    // --- FEEDBACK COLOR UTILITY (Re-added) ---
+
+    // --- FEEDBACK COLOR UTILITY (Logic maintained) ---
     const getFeedbackColor = (type: string) => {
         switch (type) {
             case 'correction': return 'bg-yellow-50 border-yellow-200 text-yellow-800';
@@ -290,7 +314,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         }
     };
 
-    // --- SIDE CHANGE UTILITY (Re-added) ---
+    // --- SIDE CHANGE UTILITY (Logic maintained) ---
     const handleSideChange = (side: 'auto' | 'left' | 'right') => {
         setAnalysisSide(side);
         if (isActive) {
@@ -300,7 +324,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
     };
 
 
-    // --- SIDE TOGGLE BUTTON (Re-added) ---
+    // --- SIDE TOGGLE BUTTON (Logic maintained) ---
     const SideToggleButton = (
         <div className="flex items-center space-x-2 bg-gray-100 p-2 rounded-xl shadow-inner">
             <span className="text-sm font-medium text-gray-700">Analyze Side:</span>
@@ -501,7 +525,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
                                 <div className="bg-green-50 border-2 border-green-200 rounded-xl p-6 text-center">
                                     <div className="text-2xl font-bold text-green-800 mb-2">YES! Set {setsCompleted + 1} Complete!</div>
                                     <p className="text-green-700 mb-4">Great job! Take a {exercise.rest_seconds} second rest before Set {setsCompleted + 2}.</p>
-                                    <button onClick={handleSetCompletion} className="bg-green-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-green-700 transition-all">
+                                    <button onClick={() => handleSetCompletion(false)} className="bg-green-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-green-700 transition-all">
                                         Start Next Set ({setsCompleted + 1} / {exercise.sets})
                                     </button>
                                 </div>
@@ -513,3 +537,4 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         </div>
     );
 };
+```
