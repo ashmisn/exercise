@@ -81,6 +81,10 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
     const [setsCompleted, setSetsCompleted] = useState(0);
     const [showCompletionModal, setShowCompletionModal] = useState(false);
     const [lastActivityTime, setLastActivityTime] = useState(Date.now());
+    
+    // ✅ NEW STATE: Flag to ensure calibration audio plays only once per set
+    const [hasCalibratedAudioPlayed, setHasCalibratedAudioPlayed] = useState(false); 
+    
     const intervalRef = useRef<NodeJs.Timeout | null>(null);
     const PAUSE_TIMEOUT_MS = 5000;
 
@@ -96,8 +100,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         "wrist flexion": "/seated-wrist-flexion.gif",
     };
     
-    // ✅ CORRECTION 1 & 3: Use useMemo for Audio objects and add "Set Completed" key
+    // ✅ Audio Map: Keys must be EXACTLY what the system needs to play.
     const audioMap = useMemo(() => ({
+        "Hai,Iam Mia i am here to assist you.": new Audio("/audio/into.mp3"),
         "No pose detected. Adjust your camera view.": new Audio("/audio/no_pose.mp3"),
         "I can't see you clearly. Please adjust your position.": new Audio("/audio/low_visibility.mp3"),
         "Please turn sideways or expose one full side.": new Audio("/audio/side_not_visible.mp3"),
@@ -109,19 +114,23 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         "Return fully to the starting position.": new Audio("/audio/return_full.mp3"),
         "Ready to start the next repetition.": new Audio("/audio/next_rep.mp3"),
         "Controlled movement upward.": new Audio("/audio/controlled_up.mp3"),
-        "Calibrating range. Move fully from start to finish position.": new Audio("/audio/calibrating.mp3"),
+        
+        // Use a clean, non-dynamic key for the audio trigger
+        "Time to calibrate. Move fully through your exercise range now.": new Audio("/audio/calibrating.mp3"),
+        
         "Full repetition completed! Well done.": new Audio("/audio/full_rep.mp3"),
         "Partial repetition counted. Complete the movement.": new Audio("/audio/partial_rep.mp3"),
-        "Set Completed! Take a rest.": new Audio("/audio/set_complete.mp3") // Added key for set completion
+        "Set Completed! Take a rest.": new Audio("/audio/set_complete.mp3") 
     }), []);
 
+    // This handles ALL feedback audio (warnings, instructions, reps, encouragement)
     useEffect(()=>{
         if(feedback.length===0) return;
         const latestMessage = feedback[feedback.length-1].message;
         if(audioMap[latestMessage]){
             audioMap[latestMessage].play().catch(err=>console.warn("Audio play error:",err));
         }
-    }, [feedback, audioMap]) // Added audioMap to dependencies
+    }, [feedback, audioMap]) 
 
     const exerciseKey = exercise.name.toLowerCase();
     const gifSrc = EXERCISE_GIF_MAP[exerciseKey] || "/default-exercise-guide.gif"; 
@@ -173,10 +182,16 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         const video = videoRef.current;
         canvas.width = video.videoWidth; canvas.height = video.videoHeight;
         const ctx = canvas.getContext('2d'); if (!ctx) return;
+        
+        // Retrieve state BEFORE sending API call to check calibration status
+        const previousFrameCount = sessionStateRef.current.frame_count || 0; 
+        const previousReps = sessionStateRef.current.reps || 0;
+
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         const frameData = canvas.toDataURL('image/jpeg', 0.8);
         const latestState = sessionStateRef.current;
         const stateToSend = { ...latestState, analysis_side: analysisSide === 'auto' ? null : analysisSide };
+        
         try {
             const response = await fetch('https://exercise-7edj.onrender.com/api/analyze_frame', {
                 method: 'POST',
@@ -189,6 +204,16 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
             }
             const data = await response.json();
             setLastActivityTime(Date.now());
+            
+            // --- ✅ AUTOMATIC CALIBRATION AUDIO LOGIC ---
+            // If we are in the first set (reps=0) and the frame count has just started (moved from 0 to 1), play audio.
+            if (previousReps === 0 && previousFrameCount === 0 && data.state.frame_count > 0 && !hasCalibratedAudioPlayed) {
+                const calibrationMessage = "Time to calibrate. Move fully through your exercise range now.";
+                audioMap[calibrationMessage]?.play().catch(err => console.warn("Calibration audio error:", err));
+                setHasCalibratedAudioPlayed(true);
+            }
+            // --- END AUTOMATIC CALIBRATION AUDIO LOGIC ---
+
             sessionStateRef.current = data.state;
             if (data.state.analysis_side && analysisSide === 'auto') setAnalysisSide(data.state.analysis_side);
             
@@ -204,7 +229,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
             
             // ✅ Check for set completion and trigger the transition
             if (data.reps >= exercise.target_reps && setsCompleted < exercise.sets) {
-                 // Trigger set completion without saving/stopping the camera prematurely
                  handleSetCompletion(true); 
             }
 
@@ -221,6 +245,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         if (shouldSave) saveSessionResult(sessionStateRef.current.reps, accuracy, shouldCompletePage);
         if (shouldCompletePage) sessionStateRef.current = { reps: 0, stage: 'down', angle: 0, last_rep_time: 0 };
         setDrawingData(null); setIsActive(false);
+        setHasCalibratedAudioPlayed(false); // Reset flag on stop
         if (shouldCompletePage) onComplete();
     };
 
@@ -230,54 +255,60 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
             if (videoRef.current) videoRef.current.srcObject = stream;
+            
+            // --- State Resets and Initial Audio ---
             setIsActive(true); setError(''); setLastActivityTime(Date.now());
-            sessionStateRef.current = { reps: 0, stage: 'down', angle: 0, last_rep_time: 0 }; setReps(0); setFeedback([]);
+            sessionStateRef.current = { reps: 0, stage: 'down', angle: 0, last_rep_time: 0, frame_count: 0 }; setReps(0); setFeedback([]);
+            
+            // 📢 Play the dedicated introduction audio immediately
+            const introMessage = "Hai,Iam Mia i am here to assist you.";
+            audioMap[introMessage]?.play().catch(err => console.warn("Intro audio error:", err));
+            
+            setHasCalibratedAudioPlayed(false); // Reset for new session/set
+            
+            // Start processing frames
             intervalRef.current = setInterval(() => captureAndAnalyze(), 500);
+            
         } catch (err) { setError('Failed to access camera. Please grant camera permissions.'); }
     };
 
     // --- HANDLE SET COMPLETION ---
-    // ✅ CORRECTION 2: Refined set completion logic for next set button
     const handleSetCompletion = (fromAnalysis: boolean = false) => {
         
         const nextSetsCompleted = setsCompleted + 1;
 
         if (fromAnalysis) {
-             // 1. Triggered by API analysis hitting target reps
-            
-            // Stop the analysis interval immediately 
             if (intervalRef.current) {
                 clearInterval(intervalRef.current);
                 intervalRef.current = null;
             }
-            setIsActive(false); // Stop processing, wait for the user to click "Next Set"
+            setIsActive(false); 
             setSetsCompleted(nextSetsCompleted);
             
-            // Play a set completion sound
+            // Play set completion sound
             const completionMessage = "Set Completed! Take a rest."; 
             audioMap[completionMessage]?.play().catch(err => console.warn("Set completion audio error:", err));
         }
 
         if (nextSetsCompleted >= exercise.sets) {
-            // All sets done: stop everything and show modal
-            if(!fromAnalysis) stopSession(true, false); // If button clicked, save the last set results
+            if(!fromAnalysis) stopSession(true, false); 
             setShowCompletionModal(true);
         } else if (!fromAnalysis) {
-            // 2. Triggered by the "Start Next Set" button
             
             // Save results for the set just finished
             saveSessionResult(reps, accuracy, false); 
             
-            // Stop camera/interval cleanly (without completing the entire page)
+            // Stop camera/interval cleanly
             stopSession(false, false); 
             
             // Reset state for the new set
             setSetsCompleted(nextSetsCompleted);
             setReps(0);
             setFeedback([]);
-            sessionStateRef.current = { reps: 0, stage: 'down', angle: 0, last_rep_time: 0 };
+            // Crucial: Reset backend state parameters to zero frame_count for calibration restart
+            sessionStateRef.current = { reps: 0, stage: 'down', angle: 0, last_rep_time: 0, frame_count: 0 }; 
+            setHasCalibratedAudioPlayed(false); // Reset audio flag for the next set's calibration
             
-            // Start the camera/analysis loop for the new set
             startCamera();
         } 
     };
@@ -297,7 +328,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
     const handleSideChange = (side: 'auto' | 'left' | 'right') => {
         setAnalysisSide(side);
         if (isActive) {
-            // Stop, wait for state update, then restart
             stopSession(false, false);
             setTimeout(startCamera, 500);
         }
@@ -349,7 +379,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
                     <Award className="w-16 h-16 text-yellow-500 mx-auto mb-4 animate-bounce" />
                     <h2 className="text-3xl font-bold text-green-700 mb-2">🎉 HURRAYYY! EXERCISE COMPLETE! 🎉</h2>
                     <p className="text-gray-700 mb-6">
-                        You successfully finished all **{exercise.sets} sets** of **{exercise.name}**!
+                        You successfully finished all {exercise.sets} sets of {exercise.name}!
                         Your discipline is a key step toward recovery.
                     </p>
                     <div className="bg-green-50 rounded-xl p-4 mb-6">
