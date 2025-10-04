@@ -34,7 +34,7 @@ if not GEMINI_API_KEY:
 
 # Correct client and model initialization for the new SDK
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL_NAME = "gemini-1.5-flash" 
+MODEL_NAME = "gemini-2.5-flash" 
 # Use a global dictionary to hold active chat session objects (In-memory history)
 active_chats: Dict[str, any] = {} # replace with genai.chats next
 # =========================================================================
