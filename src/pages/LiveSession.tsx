@@ -157,9 +157,28 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
     const [setsCompleted, setSetsCompleted] = useState(0);
     const [showCompletionModal, setShowCompletionModal] = useState(false);
     
-    const intervalRef = useRef<NodeJS.Timeout | null>(null);
+    const intervalRef = useRef<NodeJs.Timeout | null>(null);
     const [lastActivityTime, setLastActivityTime] = useState(Date.now());
     const PAUSE_TIMEOUT_MS = 5000; 
+
+    // --- GIF MAP (Matching backend exercise names) ---
+    const EXERCISE_GIF_MAP: { [key: string]: string } = {
+        "shoulder flexion": "/gifs/standing-shoulder-flexion.gif",
+        "shoulder abduction": "/gifs/standing-shoulder-abduction.gif",
+        "elbow flexion": "/gifs/seated-elbow-flexion.gif",
+        "elbow extension": "/gifs/seated-elbow-extension.gif",
+        "shoulder internal rotation": "/gifs/shoulder-internal-rotation.gif",
+        "knee flexion": "/gifs/supine-knee-flexion.giff",
+        "ankle dorsiflexion": "/gifs/seated-ankle-dorsiflexion.gif",
+        "wrist flexion": "/gifs/seated-wrist-flexion.gif",
+    };
+    
+    // --- Dynamic GIF Logic ---
+    const exerciseKey = exercise.name.toLowerCase();
+    const gifSrc = EXERCISE_GIF_MAP[exerciseKey] || "/gifs/default-exercise-guide.gif";
+    const gifDisplayName = exercise.name;
+    const gifPlaceholderText = "GIF Not Found";
+
 
     // --- PAUSE/INACTIVITY DETECTOR ---
     useEffect(() => {
@@ -199,7 +218,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         }
         
         try {
-            const response = await fetch('https://exercise-7edj.onrender.com/api/save_session', { // Using localhost for dev stability
+            // NOTE: Using a hardcoded URL. In a production app, use environment variables.
+            const response = await fetch('https://exercise-7edj.onrender.com/api/save_session', { 
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -353,7 +373,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         if (shouldCompletePage) {
              sessionStateRef.current = { reps: 0, stage: 'down', angle: 0, last_rep_time: 0 };
         }
-       
+        
         setDrawingData(null); 
         setIsActive(false);
 
@@ -577,22 +597,25 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
                                         {error}
                                     </div>
                                 )}
-                                {/* Instruction/GIF AREA */}
-                                {!isActive && (
-                                    <div className="bg-gray-50 rounded-xl p-4 text-center">
-                                        <h3 className="font-bold text-gray-800 mb-2">Reference Form</h3>
-                                        <p className="text-sm text-gray-600 mb-3">Ensure your body matches the form before starting.</p>
-                                        
-                                        {/* Placeholder for the GIF */}
-                                        <img 
-                                            src="standing-shoulder-flexion.gif" 
-                                            alt="Shoulder Flexion Exercise GIF" 
-                                            className="w-48 h-48 object-contain mx-auto rounded-lg shadow-md"
-                                            onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = "https://placehold.co/192x192/4488ff/ffffff?text=EXERCISE+GIF"; }}
-                                        />
-                                        <p className="text-xs text-gray-500 mt-2">Example: Shoulder Flexion (Side View)</p>
-                                    </div>
-                                )}
+                                
+                                {/* Instruction/GIF AREA - ALWAYS DISPLAYED (No Conditional) */}
+                                <div className="bg-gray-50 rounded-xl p-4 text-center">
+                                    <h3 className="font-bold text-gray-800 mb-2">Reference Form</h3>
+                                    <p className="text-sm text-gray-600 mb-3">Ensure your body matches the form while exercising.</p>
+                                    
+                                    {/* ✅ DYNAMIC GIF SOURCE HERE */}
+                                    <img 
+                                        src={gifSrc} // 🎯 Dynamic source
+                                        alt={gifDisplayName} 
+                                        className="w-48 h-48 object-contain mx-auto rounded-lg shadow-md"
+                                        onError={(e) => { 
+                                            e.currentTarget.onerror = null; 
+                                            e.currentTarget.src = `https://placehold.co/192x192/FF6347/ffffff?text=${gifPlaceholderText}`; 
+                                        }}
+                                    />
+                                    <p className="text-xs text-gray-500 mt-2">Example: {gifDisplayName}</p>
+                                </div>
+
                             </div>
 
                             {isActive && (
