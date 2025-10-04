@@ -430,27 +430,28 @@ def build_html_content(data):
 # NEW ENDPOINT: DOWNLOAD PDF REPORT (SIMPLIFIED PATH)
 # -------------------------------------------------------------------------
 
-@app.get("/api/pdf/{user_id}")  # <-- CHANGED ROUTE HERE
+# In your imports, ensure you have:
+from starlette.background import BackgroundTask 
+
+@app.get("/api/pdf/{user_id}")
 async def download_pdf_report(user_id: str):
     """
-    Fetches progress data by calling the get_progress endpoint internally, 
-    generates a PDF report using WeasyPrint, and returns it for download.
+    Generates a PDF report and returns it for download, deleting the temp file afterwards.
     """
     # Create a unique filename for the temporary file
     PDF_FILENAME = f"mobility_report_{user_id}_{dt.now().strftime('%Y%m%d_%H%M%S')}.pdf"
     
     try:
-        # 1. Get aggregated data by calling the progress endpoint's function
+        # 1. Get aggregated data (Success logic assumed)
         data = get_progress(user_id) 
-
         if data.get("total_sessions") == 0:
-             raise HTTPException(status_code=404, detail="No session data found for this user to generate a report.")
+            raise HTTPException(status_code=404, detail="No session data found for this user to generate a report.")
 
         # 2. Generate PDF using WeasyPrint
         html_content = build_html_content(data)
         HTML(string=html_content).write_pdf(PDF_FILENAME)
 
-        # 3. Return the file
+        # 3. Return the file, adding the cleanup task to run AFTER the response is sent
         headers = {'Content-Disposition': f'attachment; filename="{PDF_FILENAME}"'}
         print(f"File created successfully: {PDF_FILENAME}. Preparing to send...")
         
@@ -458,24 +459,27 @@ async def download_pdf_report(user_id: str):
             path=PDF_FILENAME, 
             media_type='application/pdf', 
             filename=PDF_FILENAME, 
-            headers=headers
+            headers=headers,
+            # *** CRITICAL FIX: Add background task for cleanup ***
+            background=BackgroundTask(os.remove, PDF_FILENAME) 
         )
 
     except HTTPException as e:
+        # If data is missing (404), make sure no file was created before raising
+        if os.path.exists(PDF_FILENAME):
+            os.remove(PDF_FILENAME)
         raise e
+        
     except Exception as e:
         print(f"Error generating or serving PDF: {e}")
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to generate PDF report. Check server logs for WeasyPrint system dependencies. Error: {str(e)}")
-    
-    finally:
-        # 4. Cleanup: Delete the temporary file after it has been sent
+        # Ensure cleanup on failure as well
         if os.path.exists(PDF_FILENAME):
-             try:
-                 os.remove(PDF_FILENAME)
-                 print(f"Cleaned up temporary file: {PDF_FILENAME}")
-             except Exception as e:
-                 print(f"Warning: Failed to delete temporary file {PDF_FILENAME}. Error: {e}")
+            os.remove(PDF_FILENAME)
+        raise HTTPException(status_code=500, detail=f"Failed to generate PDF report. Error: {str(e)}")
+    
+    # 4. REMOVE THE ORIGINAL FINALLY BLOCK COMPLETELY
+    # The cleanup is now handled by the BackgroundTask within FileResponse
 
 # ... (Sections 6 and 7 remain unchanged) ...
 
