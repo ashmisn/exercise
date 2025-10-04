@@ -328,160 +328,107 @@ def get_progress(user_id: str):
 
 def weekly_activity_html(weekly_data):
     html = ""
-    max_reps = max([d['reps'] for d in weekly_data] + [1]) 
+    max_reps = max([d['reps'] for d in weekly_data] + [1])  # avoid div by zero
     for day in weekly_data:
         width_percent = (day['reps'] / max_reps) * 100
-        color = "#16a34a" if day['accuracy'] > 90 else ("#f59e0b" if day['accuracy'] > 75 else "#dc2626")
+        color = "#16a34a" if day['reps'] > 0 else "#d1d5db"  # green or gray
         html += f"""
-        <div class="week-day" style="page-break-inside: avoid;">
-            <div class="day-label">{day['day']}</div>
-            <div class="bars">
-                <div class="rep-bar" style="width:{width_percent}%;"></div>
-                <div class="accuracy-bar" style="background:{color}; width:{day['accuracy']}%;"></div>
+        <div style="margin:5px 0;">
+            <strong>{day['day']}:</strong>
+            <div style="background:#e5e7eb; width:100%; height:12px; border-radius:6px; overflow:hidden;">
+                <div style="width:{width_percent}%; height:12px; background:{color};"></div>
             </div>
-            <div class="stats">{day['reps']} reps | {day['accuracy']}%</div>
+            <span style="font-size:12px;">Reps: {day['reps']} | Acc: {day['accuracy']}%</span>
         </div>
         """
     return html
 
-def recent_sessions_html(sessions):
-    html = ""
-    for s in sessions:
-        date_str = dt.fromisoformat(s['date']).strftime("%Y-%m-%d %H:%M") 
-        html += f"""
-        <div class="session-card" style="page-break-inside: avoid;">
-            <div class="session-header">
-                <strong>{s['exercise']}</strong> <span class="session-date">{date_str}</span>
-            </div>
-            <div class="session-stats">{s['reps']} reps | {s['accuracy']}% Accuracy</div>
-        </div>
-        """
-    return html
 
-def build_html_content(data):
-    """Generates the full HTML content string for the PDF report."""
-    return f"""
+def generate_pdf_report(user_id: str):
+    user_data = get_progress(user_id)
+
+    html_content = f"""
     <html>
     <head>
-    <meta charset="UTF-8">
-    <title>Mobility Recovery Report</title>
-    <style>
-    @page {{ size: A4; margin: 20mm; }}
-    body {{ font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f0f4f8; }}
-    h1 {{ text-align:center; color:#1e3a8a; }}
-    h2 {{ color:#1e40af; margin-top: 30px; border-bottom:1px solid #ccc; padding-bottom:5px; page-break-after: avoid; }}
-    .kpi-cards {{ display:flex; gap:10px; margin-bottom:30px; flex-wrap: wrap; }}
-    .kpi-card {{
-        flex:1; min-width:120px; background:white; padding:15px; border-radius:10px; box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-        text-align:center; page-break-inside: avoid;
-    }}
-    .kpi-card .value {{ font-size:1.8em; font-weight:bold; }}
-    .week-day {{ margin-bottom:15px; }}
-    .day-label {{ font-weight:bold; }}
-    .bars {{ position: relative; height:20px; margin:5px 0; background:#e5e7eb; border-radius:10px; }}
-    .rep-bar {{ position:absolute; left:0; top:0; height:100%; background:#3b82f6; border-radius:10px 0 0 10px; }}
-    .accuracy-bar {{ position:absolute; left:0; top:0; height:100%; border-radius:10px 0 0 10px; opacity:0.4; }}
-    .stats {{ font-size:0.9em; color:#374151; }}
-    .session-card {{ background:white; padding:10px; margin-bottom:10px; border-radius:8px; box-shadow:0 1px 4px rgba(0,0,0,0.1); page-break-inside: avoid; }}
-    .session-header {{ font-weight:bold; display:flex; justify-content:space-between; }}
-    .session-date {{ color:#6b7280; font-size:0.85em; }}
-    .encouragement {{ background:#3b82f6; color:white; padding:15px; border-radius:10px; margin-top:20px; page-break-inside: avoid; }}
-    </style>
+        <style>
+            body {{
+                font-family: Arial, sans-serif;
+                padding: 20px;
+                line-height: 1.6;
+            }}
+            h1 {{
+                text-align: center;
+                color: #1f2937;
+            }}
+            .summary {{
+                margin-top: 20px;
+                padding: 15px;
+                border: 1px solid #e5e7eb;
+                border-radius: 8px;
+                background: #f9fafb;
+            }}
+            .sessions {{
+                margin-top: 20px;
+            }}
+            .session-item {{
+                border-bottom: 1px solid #e5e7eb;
+                padding: 8px 0;
+            }}
+        </style>
     </head>
     <body>
+        <h1>Physiotherapy Progress Report</h1>
+        <h2>User: {user_id}</h2>
 
-    <h1>Mobility Recovery Report</h1>
-    <p style="text-align:center;"><strong>User ID:</strong> {data['user_id']} | <strong>Generated:</strong> {dt.now().strftime('%Y-%m-%d %H:%M')}</p>
+        <div class="summary">
+            <p><strong>Total Sessions:</strong> {user_data['total_sessions']}</p>
+            <p><strong>Total Reps:</strong> {user_data['total_reps']}</p>
+            <p><strong>Average Accuracy:</strong> {user_data['average_accuracy']}%</p>
+            <p><strong>Streak Days:</strong> {user_data['streak_days']}</p>
+        </div>
 
-    <h2>Overall Stats</h2>
-    <div class="kpi-cards">
-        <div class="kpi-card">Total Sessions<div class="value">{data['total_sessions']}</div></div>
-        <div class="kpi-card">Total Reps<div class="value">{data['total_reps']}</div></div>
-        <div class="kpi-card">Average Accuracy<div class="value">{data['average_accuracy']:.1f}%</div></div>
-        <div class="kpi-card">Streak Days<div class="value">{data['streak_days']}</div></div>
-    </div>
+        <h3>Weekly Activity</h3>
+        {weekly_activity_html(user_data['weekly_data'])}
 
-    <h2>Weekly Activity</h2>
-    {weekly_activity_html(data.get('weekly_data', []))}
+        <h3>Recent Sessions</h3>
+        <div class="sessions">
+    """
 
-    <h2>Recent Sessions</h2>
-    {recent_sessions_html(data.get('recent_sessions', []))}
+    for session in user_data['recent_sessions']:
+        html_content += f"""
+            <div class="session-item">
+                <strong>{session['date']}</strong> - {session['exercise']} <br>
+                Reps: {session['reps']} | Accuracy: {session['accuracy']}%
+            </div>
+        """
 
-    <div class="encouragement">
-    {'Your streak is incredible! Keep it up!' if data['streak_days'] > 5 else 'Focus on precision and consistency this week!'}
-    </div>
-
+    html_content += """
+        </div>
     </body>
     </html>
     """
 
-# -------------------------------------------------------------------------
-# NEW ENDPOINT: DOWNLOAD PDF REPORT (FIX for 404 error)
-# -------------------------------------------------------------------------
+    # Save PDF file
+    filename = f"progress_report_{user_id}.pdf"
+    HTML(string=html_content).write_pdf(filename, stylesheets=[CSS(string='@page { size: A4; margin: 1cm; }')])
+    return filename
 
-# ... (Imports and sections 1 through 4 remain unchanged) ...
 
 # =========================================================================
-# 5. API ENDPOINTS (Progress endpoints unchanged)
+# 7. PDF REPORT API ENDPOINT
 # =========================================================================
-# ... (Root, get_plan, analyze_frame, save_session, get_progress remain unchanged) ...
-
-# -------------------------------------------------------------------------
-# NEW ENDPOINT: DOWNLOAD PDF REPORT (SIMPLIFIED PATH)
-# -------------------------------------------------------------------------
-
-# In your imports, ensure you have:
-from starlette.background import BackgroundTask 
 
 @app.get("/api/pdf/{user_id}")
-async def download_pdf_report(user_id: str):
-    """
-    Generates a PDF report and returns it for download, deleting the temp file afterwards.
-    """
-    # Create a unique filename for the temporary file
-    PDF_FILENAME = f"mobility_report_{user_id}_{dt.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-    
+def download_progress_report(user_id: str):
     try:
-        # 1. Get aggregated data (Success logic assumed)
-        data = get_progress(user_id) 
-        if data.get("total_sessions") == 0:
-            raise HTTPException(status_code=404, detail="No session data found for this user to generate a report.")
-
-        # 2. Generate PDF using WeasyPrint
-        html_content = build_html_content(data)
-        HTML(string=html_content).write_pdf(PDF_FILENAME)
-
-        # 3. Return the file, adding the cleanup task to run AFTER the response is sent
-        headers = {'Content-Disposition': f'attachment; filename="{PDF_FILENAME}"'}
-        print(f"File created successfully: {PDF_FILENAME}. Preparing to send...")
-        
-        return FileResponse(
-            path=PDF_FILENAME, 
-            media_type='application/pdf', 
-            filename=PDF_FILENAME, 
-            headers=headers,
-            # *** CRITICAL FIX: Add background task for cleanup ***
-            background=BackgroundTask(os.remove, PDF_FILENAME) 
-        )
-
-    except HTTPException as e:
-        # If data is missing (404), make sure no file was created before raising
-        if os.path.exists(PDF_FILENAME):
-            os.remove(PDF_FILENAME)
-        raise e
-        
+        pdf_path = generate_pdf_report(user_id)
+        if not os.path.exists(pdf_path):
+            raise HTTPException(status_code=500, detail="PDF generation failed.")
+        return FileResponse(pdf_path, media_type="application/pdf", filename=f"{user_id}_progress_report.pdf")
     except Exception as e:
-        print(f"Error generating or serving PDF: {e}")
         traceback.print_exc()
-        # Ensure cleanup on failure as well
-        if os.path.exists(PDF_FILENAME):
-            os.remove(PDF_FILENAME)
-        raise HTTPException(status_code=500, detail=f"Failed to generate PDF report. Error: {str(e)}")
-    
-    # 4. REMOVE THE ORIGINAL FINALLY BLOCK COMPLETELY
-    # The cleanup is now handled by the BackgroundTask within FileResponse
+        raise HTTPException(status_code=500, detail=f"Error generating PDF report: {str(e)}")
 
-# ... (Sections 6 and 7 remain unchanged) ...
 
 # =========================================================================
 # 7. MAIN EXECUTION
