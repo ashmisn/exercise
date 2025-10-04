@@ -453,6 +453,11 @@ def download_progress_report(user_id: str):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error generating PDF report: {str(e)}")
 @app.post("/api/chat")
+class ChatRequest(BaseModel):
+    # This key 'message' MUST match the key sent by your JavaScript frontend:
+    # body: JSON.stringify({ message: textToSend })
+    message: str 
+
 def chat(request: ChatRequest):
     message = request.message.lower()
 
