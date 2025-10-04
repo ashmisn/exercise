@@ -542,37 +542,33 @@ def download_progress_report(user_id: str):
     raise HTTPException(status_code=500, detail=f"Error generating PDF report: {str(e)}")
 
 
-# =========================================================================
-# 9. CHAT ENDPOINT (Updated)
-# =========================================================================
 class ChatRequest(BaseModel):
-  message: str 
+    message: str
+    session_id: str # Crucial for chat history
 
-@app.post("/api/chat")
-async def chat(request: ChatRequest):
-  try:
-    message = request.message.lower()
+# =========================================================================
+# 2. PREDEFINED RESPONSES
+# =========================================================================
+PREDEFINED_RESPONSES = {
+    "pain": "If you experience pain during exercises, stop immediately. Sharp pain is a warning sign. Consult your healthcare provider if pain persists. Mild discomfort is normal, but you should never push through sharp or severe pain.",
+    "shoulder": "For shoulder exercises: Keep movements slow and controlled. Maintain good posture with shoulders back. Start with small range of motion and gradually increase. If you feel clicking or popping, reduce the range. Always warm up first.",
+    "elbow": "For elbow exercises: Keep your upper arm stable and move only your forearm. Avoid locking your elbow completely. Progress gradually with resistance. Ice after exercises if there's swelling.",
+    "wrist": "For wrist exercises: Keep movements gentle and controlled. Support your forearm on a stable surface. Rotate slowly through full range of motion. Avoid forceful movements that cause pain.",
+    "frequency": "For optimal recovery, exercise 3-5 times per week. Allow at least one day of rest between sessions for the same muscle group. Consistency is key. Listen to your body and adjust as needed.",
+    "rest": "Rest days are crucial for recovery! Your muscles need time to repair and strengthen. Never skip rest days. During rest, your body builds back stronger. Consider gentle stretching on rest days.",
+    "week": "A typical rehabilitation program runs 4-8 weeks depending on your injury. You should see gradual improvement each week. Progress may be slow but steady. If you don't see improvement after 2 weeks, consult your therapist.",
+    "correct": "To ensure correct form: 1) Move slowly and deliberately 2) Maintain proper posture 3) Breathe naturally - don't hold your breath 4) Stay within pain-free range 5) Use a mirror to check alignment 6) Focus on quality over quantity.",
+    "warm": "Always warm up before exercises! Do 5-10 minutes of light cardio like walking. Gentle arm circles help warm up shoulders. This increases blood flow and reduces injury risk.",
+    "progress": "Track your progress by: 1) Noting pain levels (should decrease over time) 2) Range of motion improvements 3) Number of reps completed 4) Daily activities becoming easier. Progress takes time - be patient!",
+    "set": "The target sets and reps in your plan are a guide. Listen to your body. If you can complete the target with good form, aim for it! If not, reduce the number and focus on perfect technique.",
+    "hydration": "Don't forget to stay **hydrated**! Proper fluid intake supports muscle function, aids recovery, and helps reduce stiffness. Drink water before, during, and after your session.",
+    "modify": "If an exercise feels too easy or causes mild pain, it might be time to **modify** it. You can increase reps, sets, or hold the end position longer. **Always consult your physical therapist** before making major changes.",
+    "how long": "Rehabilitation length varies based on the injury's severity and your body's response. Typical plans are **4-8 weeks**, but consistent, gradual effort is more important than rushing the process.",
+}
 
-    # Predefined keyword-based responses
-    PREDEFINED_RESPONSES = {
-      "pain": "If you experience pain during exercises, stop immediately. Sharp pain is a warning sign. Consult your healthcare provider if pain persists. Mild discomfort is normal, but you should never push through sharp or severe pain.",
-      "shoulder": "For shoulder exercises: Keep movements slow and controlled. Maintain good posture with shoulders back. Start with small range of motion and gradually increase. If you feel clicking or popping, reduce the range. Always warm up first.",
-      "elbow": "For elbow exercises: Keep your upper arm stable and move only your forearm. Avoid locking your elbow completely. Progress gradually with resistance. Ice after exercises if there's swelling.",
-      "wrist": "For wrist exercises: Keep movements gentle and controlled. Support your forearm on a stable surface. Rotate slowly through full range of motion. Avoid forceful movements that cause pain.",
-      "frequency": "For optimal recovery, exercise 3-5 times per week. Allow at least one day of rest between sessions for the same muscle group. Consistency is key. Listen to your body and adjust as needed.",
-      "rest": "Rest days are crucial for recovery! Your muscles need time to repair and strengthen. Never skip rest days. During rest, your body builds back stronger. Consider gentle stretching on rest days.",
-      "week": "A typical rehabilitation program runs 4-8 weeks depending on your injury. You should see gradual improvement each week. Progress may be slow but steady. If you don't see improvement after 2 weeks, consult your therapist.",
-      "correct": "To ensure correct form: 1) Move slowly and deliberately 2) Maintain proper posture 3) Breathe naturally - don't hold your breath 4) Stay within pain-free range 5) Use a mirror to check alignment 6) Focus on quality over quantity.",
-      "warm": "Always warm up before exercises! Do 5-10 minutes of light cardio like walking. Gentle arm circles help warm up shoulders. This increases blood flow and reduces injury risk.",
-      "progress": "Track your progress by: 1) Noting pain levels (should decrease over time) 2) Range of motion improvements 3) Number of reps completed 4) Daily activities becoming easier. Progress takes time - be patient!",
-      # --- NEW RESPONSES ---
-      "set": "The target sets and reps in your plan are a guide. Listen to your body. If you can complete the target with good form, aim for it! If not, reduce the number and focus on perfect technique.",
-      "hydration": "Don't forget to stay **hydrated**! Proper fluid intake supports muscle function, aids recovery, and helps reduce stiffness. Drink water before, during, and after your session.",
-      "modify": "If an exercise feels too easy or causes mild pain, it might be time to **modify** it. You can increase reps, sets, or hold the end position longer. **Always consult your physical therapist** before making major changes.",
-      "how long": "Rehabilitation length varies based on the injury's severity and your body's response. Typical plans are **4-8 weeks**, but consistent, gradual effort is more important than rushing the process.",
-      # --- END NEW RESPONSES ---
-    }
-
+# =========================================================================
+# 3. CHAT ENDPOINT (Integrated)
+# =========================================================================
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
     try:
@@ -580,7 +576,6 @@ async def chat(request: ChatRequest):
         session_id = request.session_id
         
         # --- 1. Check Predefined Keyword Responses First ---
-        # This is fast and saves API calls
         message_lower = user_message.lower()
         for keyword, response in PREDEFINED_RESPONSES.items():
             if keyword in message_lower:
@@ -590,8 +585,12 @@ async def chat(request: ChatRequest):
         
         # Get or create the chat session
         if session_id not in active_chats:
-            # Set a system instruction to ground the AI's responses
-            system_instruction = "You are a helpful and encouraging AI rehabilitation assistant. Your advice must be general and focused on safe, effective exercise form, recovery, and motivation. Always advise the user to consult their healthcare provider for specific medical advice."
+            # Set a system instruction to guide the AI's behavior
+            system_instruction = (
+                "You are a helpful and encouraging AI rehabilitation assistant. Your advice must be general and "
+                "focused on safe, effective exercise form, recovery, and motivation. Always advise the user to "
+                "consult their healthcare provider or physical therapist for specific medical advice, injury assessment, or changes to their treatment plan."
+            )
             
             chat_session = ai_model.start_chat(
                 history=[],
@@ -612,11 +611,15 @@ async def chat(request: ChatRequest):
 
     except Exception as e:
         # A 500 status is appropriate for backend/API errors
+        print(f"Error in /api/chat: {e}")
         raise HTTPException(status_code=500, detail=f"An AI or Server error occurred: {str(e)}")
 
 # =========================================================================
-# 10. MAIN EXECUTION (Unchanged)
+# 4. MAIN EXECUTION
 # =========================================================================
+# NOTE: Ensure you run this file with 'uvicorn <filename>:app --reload'
+# (assuming the file is named main.py: uvicorn main:app --reload)
+# The __name__ == "__main__" block is correct for local testing.
 if __name__ == "__main__":
-  import uvicorn
-  uvicorn.run(app, host="0.0.0.0", port=8000)
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
