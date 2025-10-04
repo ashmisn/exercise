@@ -17,6 +17,14 @@ from datetime import datetime as dt
 import os
 # --- NEW IMPORTS FOR SUPABASE ---
 from supabase import create_client, Client 
+import google.generativeai as genai
+# Import types for history structure
+from google.generativeai.types import Content, Part
+
+genai.configure(api_key=GEMINI_API_KEY)
+# We will use the model for the Chat service
+model = genai.GenerativeModel("gemini-1.5-flash") 
+
 # --------------------------------
 
 # =========================================================================
@@ -546,7 +554,7 @@ async def chat(request: ChatRequest):
     message = request.message.lower()
 
     # Predefined keyword-based responses
-    responses = {
+    PREDEFINED_RESPONSES = {
       "pain": "If you experience pain during exercises, stop immediately. Sharp pain is a warning sign. Consult your healthcare provider if pain persists. Mild discomfort is normal, but you should never push through sharp or severe pain.",
       "shoulder": "For shoulder exercises: Keep movements slow and controlled. Maintain good posture with shoulders back. Start with small range of motion and gradually increase. If you feel clicking or popping, reduce the range. Always warm up first.",
       "elbow": "For elbow exercises: Keep your upper arm stable and move only your forearm. Avoid locking your elbow completely. Progress gradually with resistance. Ice after exercises if there's swelling.",
@@ -565,19 +573,46 @@ async def chat(request: ChatRequest):
       # --- END NEW RESPONSES ---
     }
 
-    # Check if the message contains any keyword
-    for keyword, response in responses.items():
-      if keyword in message:
-        return {"response": response}
+@app.post("/api/chat")
+async def chat(request: ChatRequest):
+    try:
+        user_message = request.message
+        session_id = request.session_id
+        
+        # --- 1. Check Predefined Keyword Responses First ---
+        # This is fast and saves API calls
+        message_lower = user_message.lower()
+        for keyword, response in PREDEFINED_RESPONSES.items():
+            if keyword in message_lower:
+                return {"response": response}
 
-    # Default fallback response
-    return {
-      "response": "I'm here to help with your rehabilitation exercises! You can ask me about:\n\n• Exercise techniques (shoulder, elbow, wrist)\n• Pain management\n• Exercise frequency and rest days\n• Proper form and technique\n• Progress tracking\n• Warm-up routines\n• Sets and Reps\n• Hydration\n\nWhat would you like to know?"
-    }
+        # --- 2. Handle Gemini AI Conversation ---
+        
+        # Get or create the chat session
+        if session_id not in active_chats:
+            # Set a system instruction to ground the AI's responses
+            system_instruction = "You are a helpful and encouraging AI rehabilitation assistant. Your advice must be general and focused on safe, effective exercise form, recovery, and motivation. Always advise the user to consult their healthcare provider for specific medical advice."
+            
+            chat_session = ai_model.start_chat(
+                history=[],
+                config=genai.types.GenerateContentConfig(
+                    system_instruction=system_instruction
+                )
+            )
+            active_chats[session_id] = chat_session
+            print(f"New chat session created for ID: {session_id}")
+        else:
+            chat_session = active_chats[session_id]
 
-  except Exception as e:
-    raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        # Send message to Gemini
+        gemini_response = chat_session.send_message(user_message)
+        bot_response = gemini_response.text
 
+        return {"response": bot_response}
+
+    except Exception as e:
+        # A 500 status is appropriate for backend/API errors
+        raise HTTPException(status_code=500, detail=f"An AI or Server error occurred: {str(e)}")
 
 # =========================================================================
 # 10. MAIN EXECUTION (Unchanged)
