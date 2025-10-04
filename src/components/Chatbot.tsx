@@ -19,10 +19,16 @@ const QUICK_QUESTIONS = [
 
 export const Chatbot: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
+  // 1. ADD: State for the current chat session ID. 
+  // It is initialized once when the component mounts.
+  const [sessionId] = useState<string>(
+    `session-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
+  );
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
-      text: 'Hello! I\'m your AI rehabilitation assistant. How can I help you with your exercises today?',
+      text: 'Hello! I\'m your AI rehabilitation assistant. How can I help you with your exercises today? (My Gemini integration allows me to remember what you\'ve said!)',
       sender: 'bot',
       timestamp: new Date(),
     },
@@ -41,7 +47,7 @@ export const Chatbot: React.FC = () => {
 
   const handleSendMessage = async (messageText?: string) => {
     const textToSend = messageText || input.trim();
-    if (!textToSend) return;
+    if (!textToSend || !sessionId) return; // Ensure session_id is available
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -60,7 +66,8 @@ export const Chatbot: React.FC = () => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ message: textToSend }),
+        // 2. CHANGE: Pass the sessionId along with the message
+        body: JSON.stringify({ message: textToSend, session_id: sessionId }),
       });
 
       if (!response.ok) {
@@ -119,7 +126,7 @@ export const Chatbot: React.FC = () => {
               </div>
               <div>
                 <h3 className="font-semibold">AI Assistant</h3>
-                <p className="text-xs text-blue-100">Always here to help</p>
+                <p className="text-xs text-blue-100">Session: {sessionId.substring(8, 15)}</p>
               </div>
             </div>
             <button
@@ -232,3 +239,4 @@ export const Chatbot: React.FC = () => {
     </>
   );
 };
+
