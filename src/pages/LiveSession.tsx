@@ -1,9 +1,9 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Camera, StopCircle, Play, AlertCircle, CheckCircle, Award, RotateCw, MoveLeft, MoveRight } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
+import { Camera, StopCircle, Play, AlertCircle, CheckCircle, Award, Hand, HandPlatter, MoveLeft, MoveRight } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext'; // Original, correct import
 
 
-// --- INTERFACE DEFINITIONS (omitted for brevity) ---
+// --- INTERFACE DEFINITIONS ---
 interface Exercise {
     name: string;
     description: string;
@@ -24,7 +24,7 @@ interface LiveSessionProps {
 }
 
 interface FeedbackItem {
-    type: 'correction' | 'encouragement' | 'warning' | 'progress'; // Added 'progress' type
+    type: 'correction' | 'encouragement' | 'warning';
     message: string;
 }
 
@@ -54,7 +54,7 @@ const POSE_CONNECTIONS: [number, number][] = [
     [11, 23], [12, 24], [23, 24], [23, 25], [24, 26], [25, 27], [26, 28], [27, 29], [28, 30], [29, 31], [30, 32], [27, 31], [28, 32]
 ];
 
-// --- DRAWING UTILITY FUNCTION (omitted for brevity) ---
+// --- DRAWING UTILITY FUNCTION (Outside Component) ---
 const drawLandmarks = (
     ctx: CanvasRenderingContext2D,
     drawingData: DrawingData,
@@ -66,8 +66,7 @@ const drawLandmarks = (
     const { landmarks, angleData } = drawingData;
 
     // 1. Draw Skeleton Lines
-    // 🎨 Aesthetic Change: Use a softer, glowing blue line color
-    ctx.strokeStyle = 'rgba(0, 150, 255, 0.9)'; 
+    ctx.strokeStyle = 'rgba(76, 175, 80, 0.9)'; // Green lines
     POSE_CONNECTIONS.forEach(([i, j]) => {
         const p1 = landmarks[i];
         const p2 = landmarks[j];
@@ -81,8 +80,7 @@ const drawLandmarks = (
     });
 
     // 2. Draw Joints (Circles)
-    // 🎨 Aesthetic Change: Use a vibrant coral color for active joints
-    ctx.fillStyle = '#FF7F50'; 
+    ctx.fillStyle = 'rgb(255, 255, 255)'; // White circles
     landmarks.forEach(p => {
         if (p.visibility > 0.6) {
             ctx.beginPath();
@@ -95,10 +93,12 @@ const drawLandmarks = (
     if (angleData && angleData.angle > 0) {
         const { angle, A, B, C } = angleData;
 
+        // Convert normalized coordinates to pixel coordinates
         const center = { x: B.x * width, y: B.y * height };
         const pA = { x: A.x * width, y: A.y * height };
         const pC = { x: C.x * width, y: C.y * height };
         
+        // Calculate the angle arc start and end points (simplified for drawing overlay)
         const startAngle = Math.atan2(pA.y - center.y, pA.x - center.x);
         const endAngle = Math.atan2(pC.y - center.y, pC.x - center.x);
         
@@ -108,17 +108,17 @@ const drawLandmarks = (
         if (start > end) { [start, end] = [end, start]; }
         
         // Draw Angle Arc
-        ctx.strokeStyle = '#32CD32'; // Lime green for the angle indicator
-        ctx.lineWidth = 5;
+        ctx.strokeStyle = '#FFC107'; // Amber color for arc
+        ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.arc(center.x, center.y, 40, start, end);
         ctx.stroke();
 
         // Draw Angle Text
-        ctx.fillStyle = '#FFFFFF';
-        ctx.strokeStyle = '#10B981'; // Mint shadow
-        ctx.lineWidth = 4;
-        ctx.font = 'bold 30px sans-serif'; // Bolder font
+        ctx.fillStyle = 'white';
+        ctx.strokeStyle = 'black';
+        ctx.lineWidth = 2;
+        ctx.font = 'bold 24px Arial';
         
         const textX = center.x + 10;
         const textY = center.y - 10;
@@ -161,26 +161,26 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
     const [lastActivityTime, setLastActivityTime] = useState(Date.now());
     const PAUSE_TIMEOUT_MS = 5000; 
 
-    // --- GIF MAP (paths corrected to root public folder) ---
+    // --- GIF MAP (Matching backend exercise names) ---
     const EXERCISE_GIF_MAP: { [key: string]: string } = {
         "shoulder flexion": "/standing-shoulder-flexion.gif",
         "shoulder abduction": "/standing-shoulder-abduction.gif",
         "elbow flexion": "/seated-elbow-flexion.gif",
-        "elbow extension": "/seated-elbow-extension.gif",
-        "shoulder internal rotation": "/shoulder-internal-rotation.gif",
-        "knee flexion": "/supine-knee-flexion.gif",
-        "ankle dorsiflexion": "/seated-ankle-dorsiflexion.gif",
-        "wrist flexion": "/seated-wrist-flexion.gif",
+        "elbow extension": "/gifs/seated-elbow-extension.gif",
+        "shoulder internal rotation": "/gifs/shoulder-internal-rotation.gif",
+        "knee flexion": "/gifs/supine-knee-flexion.giff",
+        "ankle dorsiflexion": "/gifs/seated-ankle-dorsiflexion.gif",
+        "wrist flexion": "/gifs/seated-wrist-flexion.gif",
     };
     
     // --- Dynamic GIF Logic ---
     const exerciseKey = exercise.name.toLowerCase();
-    const gifSrc = EXERCISE_GIF_MAP[exerciseKey] || "/default-exercise-guide.gif"; 
+    const gifSrc = EXERCISE_GIF_MAP[exerciseKey] || "/gifs/default-exercise-guide.gif";
     const gifDisplayName = exercise.name;
-    const gifPlaceholderText = "Image Not Available";
+    const gifPlaceholderText = "GIF Not Found";
 
 
-    // --- PAUSE/INACTIVITY DETECTOR (omitted for brevity) ---
+    // --- PAUSE/INACTIVITY DETECTOR ---
     useEffect(() => {
         let pauseCheckInterval: NodeJS.Timeout | null = null;
 
@@ -202,20 +202,23 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
             if (pauseCheckInterval) clearInterval(pauseCheckInterval);
         };
     }, [isActive, lastActivityTime, reps, setsCompleted, exercise.sets]); 
+    // ------------------------------------
 
 
-    // --- Save Session Result Function (omitted for brevity) ---
+    // --- Save Session Result Function ---
     const saveSessionResult = async (finalReps: number, finalAccuracy: number, isAutoSave: boolean) => {
         if (!user?.id) {
             console.error("Cannot save session: User ID is missing.");
             return;
         }
+
         if (finalReps === 0) {
             console.log("Session ended with 0 reps, not saving.");
             return;
         }
         
         try {
+            // NOTE: Using a hardcoded URL. In a production app, use environment variables.
             const response = await fetch('https://exercise-7edj.onrender.com/api/save_session', { 
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -227,7 +230,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
                 }),
             });
 
-            if (!response.ok) {
+            if (response.ok) {
+                console.log(`Successfully saved ${finalReps} reps to DB (AutoSave: ${isAutoSave}).`);
+            } else {
                 const errorDetail = await response.json().catch(() => ({ detail: 'Unknown Save Error' }));
                 console.error('Failed to save session:', response.status, errorDetail.detail);
             }
@@ -235,93 +240,284 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
             console.error('Network error while saving session:', error);
         }
     };
+    // ----------------------------------------
 
-    // --- Core analysis and session control functions (omitted for brevity) ---
-    // ... (All other complex functions like captureAndAnalyze, stopSession, startCamera remain the same)
-    
-    // --- Helper function for aesthetic feedback colors ---
+
+    // --- useEffect for Drawing (Remains the same) ---
+    useEffect(() => {
+        if (drawingData && drawingCanvasRef.current && isActive) {
+            const canvas = drawingCanvasRef.current;
+            const ctx = canvas.getContext('2d');
+            const video = videoRef.current;
+            
+            if (ctx && video) {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+
+                drawLandmarks(
+                    ctx,
+                    drawingData,
+                    canvas.width,
+                    canvas.height
+                );
+            }
+        } else if (drawingCanvasRef.current) {
+            drawingCanvasRef.current.getContext('2d')?.clearRect(0, 0, drawingCanvasRef.current.width, drawingCanvasRef.current.height);
+        }
+    }, [drawingData, isActive]);
+    // ----------------------------
+
+
+    useEffect(() => {
+        return () => {
+            stopSession(false, false); 
+        };
+    }, []);
+
+    const captureAndAnalyze = async () => {
+        if (!videoRef.current || !hiddenCanvasRef.current || showCompletionModal) return;
+
+        const canvas = hiddenCanvasRef.current;
+        const video = videoRef.current;
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        const frameData = canvas.toDataURL('image/jpeg', 0.8);
+
+        const latestState = sessionStateRef.current; 
+        
+        // CRITICAL: Inject the manually selected side into the state sent to the API
+        const stateToSend = {
+            ...latestState,
+            analysis_side: analysisSide === 'auto' ? null : analysisSide 
+        };
+
+        try {
+            const response = await fetch('https://exercise-7edj.onrender.com/api/analyze_frame', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    frame: frameData,
+                    exercise_name: exercise.name,
+                    previous_state: stateToSend, 
+                }),
+            });
+
+            if (!response.ok) {
+                const errorDetail = await response.json().catch(() => ({ detail: 'Unknown Server Error' }));
+                throw new Error(`Failed to analyze frame: ${errorDetail.detail}`);
+            }
+
+            const data = await response.json();
+
+            setLastActivityTime(Date.now()); 
+
+            // Update mutable ref with the *entire* state returned by the API
+            sessionStateRef.current = data.state;
+            
+            // If the API auto-detected a side, update our local state to reflect it
+            if (data.state.analysis_side && analysisSide === 'auto') {
+                setAnalysisSide(data.state.analysis_side);
+            }
+
+
+            setReps(data.reps);
+            setFeedback(data.feedback);
+            setAccuracy(data.accuracy_score);
+            setDrawingData({
+                landmarks: data.drawing_landmarks,
+                angleData: {
+                    angle: data.current_angle,
+                    A: data.angle_coords.A,
+                    B: data.angle_coords.B,
+                    C: data.angle_coords.C,
+                }
+            });
+
+
+            if (data.reps >= exercise.target_reps) {
+                stopSession(false, false);
+            }
+        } catch (err) {
+            console.error('Analysis error:', err);
+            setError('Connection or Analysis Error. Check backend console.');
+            setDrawingData(null);
+        }
+    };
+
+    // Modified stopSession to accept shouldSave and shouldCompletePage flags
+    const stopSession = (shouldSave: boolean, shouldCompletePage: boolean) => {
+        // Stop the interval
+        if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
+        }
+
+        // Stop camera tracks
+        if (videoRef.current && videoRef.current.srcObject) {
+            const stream = videoRef.current.srcObject as MediaStream;
+            stream.getTracks().forEach((track) => track.stop());
+            videoRef.current.srcObject = null;
+        }
+
+        if (shouldSave) {
+            saveSessionResult(sessionStateRef.current.reps, accuracy, shouldCompletePage);
+        }
+        
+        if (shouldCompletePage) {
+             sessionStateRef.current = { reps: 0, stage: 'down', angle: 0, last_rep_time: 0 };
+        }
+        
+        setDrawingData(null); 
+        setIsActive(false);
+
+        if (shouldCompletePage) {
+            onComplete(); 
+        }
+    };
+
+    const startCamera = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { width: 640, height: 480 },
+            });
+
+            if (videoRef.current) {
+                videoRef.current.srcObject = stream;
+            }
+
+            setIsActive(true);
+            setError('');
+            setLastActivityTime(Date.now()); 
+
+            sessionStateRef.current = { reps: 0, stage: 'down', angle: 0, last_rep_time: 0 };
+            setReps(0);
+            setFeedback([]);
+
+            intervalRef.current = setInterval(() => {
+                captureAndAnalyze();
+            }, 500); 
+        } catch (err) {
+            setError('Failed to access camera. Please grant camera permissions.');
+        }
+    };
+
+    // Function to handle the successful completion of a set
+    const handleSetCompletion = () => {
+        saveSessionResult(reps, accuracy, false); 
+
+        const nextSetsCompleted = setsCompleted + 1;
+        
+        if (nextSetsCompleted >= exercise.sets) {
+            if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+                intervalRef.current = null;
+            }
+            if (videoRef.current && videoRef.current.srcObject) {
+                const stream = videoRef.current.srcObject as MediaStream;
+                stream.getTracks().forEach((track) => track.stop());
+                videoRef.current.srcObject = null;
+            }
+            setIsActive(false);
+            
+            setSetsCompleted(nextSetsCompleted);
+            setShowCompletionModal(true); 
+            
+        } else {
+            setSetsCompleted(nextSetsCompleted);
+            setReps(0);
+            setFeedback([]);
+            sessionStateRef.current = { reps: 0, stage: 'down', angle: 0, last_rep_time: 0 };
+            startCamera(); 
+        }
+    };
+
     const getFeedbackColor = (type: string) => {
         switch (type) {
-            // 🎨 Aesthetic colors for feedback boxes
-            case 'correction': return 'bg-yellow-100 border-yellow-400 text-yellow-800';
-            case 'encouragement': return 'bg-green-100 border-green-400 text-green-800';
-            case 'warning': return 'bg-red-100 border-red-400 text-red-800';
-            case 'progress': return 'bg-blue-100 border-blue-400 text-blue-800'; // Added for calibration/current movement
-            default: return 'bg-gray-100 border-gray-300 text-gray-700';
-        }
-    };
-
-    const handleSideChange = (side: 'auto' | 'left' | 'right') => {
-        // ... (function logic remains the same)
-        setAnalysisSide(side);
-        if (isActive) {
-            // Restart session to clear state for new side
-            stopSession(false, false); 
-            setTimeout(startCamera, 500);
+            case 'correction': return 'bg-yellow-50 border-yellow-200 text-yellow-800';
+            case 'encouragement': return 'bg-green-50 border-green-200 text-green-800';
+            case 'warning': return 'bg-red-50 border-red-200 text-red-800';
+            default: return 'bg-gray-50 border-gray-200 text-gray-800';
         }
     };
     
-    // --- Render Side Toggle UI (omitted for brevity) ---
+    // Utility for changing side
+    const handleSideChange = (side: 'auto' | 'left' | 'right') => {
+        setAnalysisSide(side);
+        // Restart session to clear any ongoing calibration that might be stuck
+        if (isActive) {
+            stopSession(false, false); 
+            setTimeout(startCamera, 500); // Restart analysis after a slight delay
+        }
+    };
+
+    // --- Render Side Toggle UI ---
     const SideToggleButton = (
-        <div className="flex items-center space-x-2 bg-white p-2 rounded-xl border border-gray-200">
-            <RotateCw className="w-4 h-4 text-gray-500" />
-            <span className="text-sm font-semibold text-gray-700">Side:</span>
+        <div className="flex items-center space-x-2 bg-gray-100 p-2 rounded-xl shadow-inner">
+            <span className="text-sm font-medium text-gray-700">Analyze Side:</span>
             
             {/* Auto Button */}
             <button
                 onClick={() => handleSideChange('auto')}
-                className={`px-3 py-1 rounded-full text-xs font-bold transition ${
-                    analysisSide === 'auto' ? 'bg-indigo-500 text-white shadow-md' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                className={`px-3 py-1 rounded-lg text-sm font-semibold transition ${
+                    analysisSide === 'auto' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-blue-50'
                 }`}
             >
-                AUTO
+                Auto
             </button>
             
             {/* Left Button */}
             <button
                 onClick={() => handleSideChange('left')}
-                className={`px-3 py-1 rounded-full text-xs font-bold transition ${
-                    analysisSide === 'left' ? 'bg-indigo-500 text-white shadow-md' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                className={`px-3 py-1 rounded-lg text-sm font-semibold transition ${
+                    analysisSide === 'left' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-blue-50'
                 }`}
             >
-                LEFT
+                Left
             </button>
             
             {/* Right Button */}
             <button
                 onClick={() => handleSideChange('right')}
-                className={`px-3 py-1 rounded-full text-xs font-bold transition ${
-                    analysisSide === 'right' ? 'bg-indigo-500 text-white shadow-md' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                className={`px-3 py-1 rounded-lg text-sm font-semibold transition ${
+                    analysisSide === 'right' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-blue-50'
                 }`}
             >
-                RIGHT
+                Right
             </button>
         </div>
     );
     // ---------------------------
 
-    // --- Final Completion Modal Component (omitted for brevity) ---
+    // --- Final Completion Modal Component ---
     if (showCompletionModal) {
         return (
             <div className="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 p-4">
-                <div className="bg-white rounded-3xl shadow-2xl p-10 w-full max-w-md text-center transform transition-all duration-300 scale-100">
-                    <Award className="w-16 h-16 text-yellow-500 mx-auto mb-6 animate-pulse" />
-                    <h2 className="text-3xl font-extrabold text-green-600 mb-3">
-                        🎉 Mission Complete! 🎉
+                <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md text-center transform transition-all duration-300 scale-100">
+                    <Award className="w-16 h-16 text-yellow-500 mx-auto mb-4 animate-bounce" />
+                    <h2 className="text-3xl font-bold text-green-700 mb-2">
+                        🎉 HURRAYYY! EXERCISE COMPLETE! 🎉
                     </h2>
-                    <p className="text-gray-700 mb-8 font-medium">
-                        You crushed all **{exercise.sets} sets** of **{exercise.name}**! Your commitment is incredible.
+                    <p className="text-gray-700 mb-6">
+                        You successfully finished all **{exercise.sets} sets** of **{exercise.name}**!
+                        Your discipline is a key step toward recovery.
                     </p>
-                    <div className="bg-green-50 rounded-xl p-4 mb-8">
-                        <p className="font-extrabold text-xl text-green-800">
-                            Total Sets: {setsCompleted} / {exercise.sets}
+                    <div className="bg-green-50 rounded-xl p-4 mb-6">
+                        <p className="font-semibold text-lg text-green-800">
+                            Total Sets Completed: {setsCompleted} / {exercise.sets}
                         </p>
                     </div>
                     <button
                         onClick={onComplete}
-                        className="w-full bg-indigo-600 text-white py-4 rounded-xl text-lg font-bold hover:bg-indigo-700 transition-all shadow-lg"
+                        className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 transition-all"
                     >
-                        Back to Progress
+                        Return to Dashboard
                     </button>
                 </div>
             </div>
@@ -331,102 +527,93 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
 
 
     return (
-        // 🎨 Aesthetic Change: Soft pastel background gradient
-        <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50 py-12">
+        <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-blue-50 py-8">
             <div className="max-w-7xl mx-auto px-4">
-                {/* 🎨 Aesthetic Change: Large rounded corners and distinct shadow */}
-                <div className="bg-white rounded-3xl shadow-2xl p-10">
-                    <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-10 border-b pb-6 border-gray-100">
-                        <div className="mb-4 md:mb-0">
-                            <h1 className="text-4xl font-extrabold text-gray-800 mb-1">
-                                {exercise.name} 
+                <div className="bg-white rounded-2xl shadow-xl p-8">
+                    <div className="flex items-center justify-between mb-8">
+                        <div>
+                            <h1 className="text-3xl font-bold text-gray-900 mb-2">
+                                {exercise.name} (Set {setsCompleted + 1} of {exercise.sets})
                             </h1>
-                            <p className="text-lg text-indigo-500 font-semibold mb-3">{exercise.description}</p>
-                            
+                            <p className="text-gray-600">{exercise.description}</p>
                             {/* NEW: Display the side toggle next to the exercise title */}
-                            <div className="mt-4">{SideToggleButton}</div>
+                            <div className="mt-2">{SideToggleButton}</div>
                         </div>
                         <button
                             onClick={() => {
-                                // Only save if reps > 0
-                                stopSession(reps > 0, true); 
+                                stopSession(false, true); 
                             }} 
-                            // 🎨 Aesthetic Change: Clear secondary action button
-                            className="bg-gray-100 text-gray-600 px-6 py-3 rounded-xl font-semibold hover:bg-gray-200 transition-all text-sm"
+                            className="bg-gray-100 text-gray-700 px-6 py-3 rounded-lg font-medium hover:bg-gray-200 transition-all"
                         >
-                            End Session
+                            End Session (Don't Save)
                         </button>
                     </div>
 
-                    <div className="grid lg:grid-cols-2 gap-10">
-                        {/* LEFT COLUMN: VIDEO & GIF GUIDE */}
-                        <div className="order-2 lg:order-1">
+                    <div className="grid lg:grid-cols-2 gap-8">
+                        <div>
                             {/* Image/Video Display */}
-                            {/* 🎨 Aesthetic Change: Soft shadow around video container */}
-                            <div className="relative bg-gray-900 rounded-3xl overflow-hidden aspect-video shadow-xl">
-                                
-                                {/* Video element shows the live stream (omitted for brevity) */}
+                            <div className="relative bg-gray-900 rounded-xl overflow-hidden aspect-video">
+                                {/* Video element shows the live stream */}
                                 <video
                                     ref={videoRef}
                                     autoPlay
                                     playsInline
                                     muted
-                                    className="w-full h-full object-cover transform scale-x-[-1]" // Flipping the video horizontally (optional)
+                                    className="w-full h-full object-cover"
                                 />
+                                
+                                {/* Hidden canvas for capturing frames to send to API */}
                                 <canvas ref={hiddenCanvasRef} className="hidden" />
 
-                                {/* Drawing canvas OVERLAY */}
+                                {/* Drawing canvas OVERLAY for skeleton and angles */}
                                 <canvas
                                     ref={drawingCanvasRef}
-                                    className="absolute top-0 left-0 w-full h-full object-cover transform scale-x-[-1]"
+                                    className="absolute top-0 left-0 w-full h-full object-cover"
                                 />
 
                                 {/* Start/Stop UI overlay */}
                                 {!isActive && (
-                                    <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-70">
-                                        <div className="text-center p-6 bg-white bg-opacity-90 rounded-2xl shadow-2xl">
-                                            <Camera className="w-12 h-12 text-indigo-600 mx-auto mb-4" />
-                                            <p className="text-gray-800 text-xl font-semibold mb-6">Ready to begin?</p>
+                                    <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-50">
+                                        <div className="text-center">
+                                            <Camera className="w-16 h-16 text-white mx-auto mb-4" />
+                                            <p className="text-white text-lg mb-4">Camera not active</p>
                                             <button
                                                 onClick={startCamera}
-                                                // 🎨 Aesthetic Change: Gradient button
-                                                className="bg-gradient-to-r from-green-500 to-teal-500 text-white px-8 py-4 rounded-full text-lg font-bold hover:from-green-600 hover:to-teal-600 transition-all inline-flex items-center shadow-lg"
+                                                className="bg-green-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-green-700 transition-all inline-flex items-center"
                                             >
-                                                <Play className="w-5 h-5 mr-2 fill-white" />
-                                                Start Session
+                                                <Play className="w-5 h-5 mr-2" />
+                                                Start Camera
                                             </button>
                                         </div>
                                     </div>
                                 )}
                             </div>
 
-                            {/* GIF Display and Error */}
-                            <div className="mt-8">
+                            {/* NEW: GIF Display and Error */}
+                            <div className="mt-4">
                                 {error && (
-                                    // 🎨 Aesthetic Change: Bolder error box
-                                    <div className="mb-6 bg-red-100 border-2 border-red-400 text-red-800 px-5 py-4 rounded-xl text-base font-medium flex items-center shadow-sm">
-                                        <AlertCircle className="w-6 h-6 mr-3" />
+                                    <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm flex items-center">
+                                        <AlertCircle className="w-5 h-5 mr-2" />
                                         {error}
                                     </div>
                                 )}
                                 
-                                {/* Instruction/GIF AREA - ALWAYS DISPLAYED */}
-                                <div className="bg-white p-6 border-2 border-gray-100 rounded-2xl text-center shadow-md">
-                                    <h3 className="font-extrabold text-xl text-gray-800 mb-3 border-b pb-2 border-gray-200">Reference Form</h3>
-                                    <p className="text-sm text-gray-600 mb-4">Maintain this form throughout the movement for best results.</p>
+                                {/* Instruction/GIF AREA - ALWAYS DISPLAYED (No Conditional) */}
+                                <div className="bg-gray-50 rounded-xl p-4 text-center">
+                                    <h3 className="font-bold text-gray-800 mb-2">Reference Form</h3>
+                                    <p className="text-sm text-gray-600 mb-3">Ensure your body matches the form while exercising.</p>
                                     
-                                    {/* DYNAMIC GIF SOURCE */}
+                                    {/* ✅ DYNAMIC GIF SOURCE HERE */}
                                     <img 
-                                        src={gifSrc} 
+                                        src={gifSrc} // 🎯 Dynamic source
                                         alt={gifDisplayName} 
-                                        // 🎨 Aesthetic Change: Slightly larger image and stronger styling
-                                        className="w-56 h-56 object-contain mx-auto rounded-xl shadow-lg border-4 border-white"
+                                        className="w-48 h-48 object-contain mx-auto rounded-lg shadow-md"
                                         onError={(e) => { 
                                             e.currentTarget.onerror = null; 
-                                            e.currentTarget.src = `https://placehold.co/224x224/FF6347/ffffff?text=${gifPlaceholderText}`; 
+                                            e.currentTarget.src = `https://placehold.co/192x192/FF6347/ffffff?text=${gifPlaceholderText}`; 
                                         }}
                                     />
-                                    <p className="text-sm text-indigo-500 font-medium mt-3">Current Exercise: {gifDisplayName}</p>
+                                    <p className="text-xs text-gray-500 mt-2">Example: {gifDisplayName}</p>
                                 </div>
 
                             </div>
@@ -434,112 +621,95 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
                             {isActive && (
                                 <button
                                     onClick={() => stopSession(true, true)}
-                                    // 🎨 Aesthetic Change: Prominent danger button
-                                    className="mt-6 w-full bg-red-500 text-white py-4 rounded-xl text-lg font-bold hover:bg-red-600 transition-all inline-flex items-center justify-center shadow-lg"
+                                    className="mt-4 w-full bg-red-600 text-white py-3 rounded-lg font-medium hover:bg-red-700 transition-all inline-flex items-center justify-center"
                                 >
-                                    <StopCircle className="w-6 h-6 mr-3" />
-                                    Stop & Save Progress
+                                    <StopCircle className="w-5 h-5 mr-2" />
+                                    Stop Session & Save
                                 </button>
                             )}
                             <div className="mt-4 text-sm text-gray-500 text-center">
-                                {isActive && `| Auto-save if paused for ${PAUSE_TIMEOUT_MS / 1000} seconds`}
+                                {isActive && `Sets: ${setsCompleted} / ${exercise.sets}`}
+                                {isActive && reps > 0 && ` | Auto-save if paused for ${PAUSE_TIMEOUT_MS / 1000} seconds`}
                             </div>
                         </div>
 
-                        {/* RIGHT COLUMN: METRICS & FEEDBACK */}
-                        <div className="space-y-6 order-1 lg:order-2">
-                            
-                            {/* REPS & ACCURACY BOXES */}
+                        <div className="space-y-6">
                             <div className="grid grid-cols-2 gap-4">
-                                {/* Reps Card */}
-                                {/* 🎨 Aesthetic Change: Soft shadow, bold font */}
-                                <div className="bg-indigo-50 rounded-3xl p-6 shadow-md border-b-4 border-indigo-200">
-                                    <div className="text-6xl font-extrabold text-indigo-600 mb-1">
+                                <div className="bg-blue-50 rounded-xl p-6">
+                                    <div className="text-4xl font-bold text-blue-600 mb-2">
                                         {reps}
                                     </div>
-                                    <div className="text-md text-gray-600 font-semibold">
-                                        Reps
+                                    <div className="text-sm text-gray-600">
+                                        Reps Completed
                                     </div>
-                                    <div className="text-xs text-gray-500 mt-2">
-                                        Target: {exercise.target_reps} / set
+                                    <div className="text-xs text-gray-500 mt-1">
+                                        Target: {exercise.target_reps}
                                     </div>
                                 </div>
 
-                                {/* Accuracy Card */}
-                                <div className="bg-teal-50 rounded-3xl p-6 shadow-md border-b-4 border-teal-200">
-                                    <div className="text-6xl font-extrabold text-teal-600 mb-1">
+                                <div className="bg-green-50 rounded-xl p-6">
+                                    <div className="text-4xl font-bold text-green-600 mb-2">
                                         {accuracy.toFixed(0)}%
                                     </div>
-                                    <div className="text-md text-gray-600 font-semibold">
-                                        Accuracy
-                                    </div>
-                                    <div className="text-xs text-gray-500 mt-2">
-                                        Avg. Form Score
+                                    <div className="text-sm text-gray-600">
+                                        Accuracy Score
                                     </div>
                                 </div>
                             </div>
 
-                            {/* SESSION DETAILS */}
-                            <div className="bg-white border border-gray-200 rounded-3xl p-6 shadow-md">
-                                <h3 className="text-xl font-extrabold text-gray-800 mb-4 border-b pb-2">
-                                    Session Progress
+                            <div className="bg-gray-50 rounded-xl p-6">
+                                <h3 className="text-lg font-bold text-gray-900 mb-4">
+                                    Exercise Details
                                 </h3>
-                                <div className="space-y-3 text-base">
-                                    <div className="flex justify-between items-center">
-                                        <span className="text-gray-600 font-medium flex items-center">
-                                            <CheckCircle className="w-5 h-5 mr-2 text-indigo-400" />Sets Completed:
-                                        </span>
-                                        <span className="font-extrabold text-indigo-600">{setsCompleted} / {exercise.sets}</span>
+                                <div className="space-y-2 text-sm">
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">Target Reps:</span>
+                                        <span className="font-medium">{exercise.target_reps}</span>
                                     </div>
-                                    <div className="flex justify-between items-center">
-                                        <span className="text-gray-600 font-medium flex items-center">
-                                            <RotateCw className="w-5 h-5 mr-2 text-green-400" />Current Reps:
-                                        </span>
-                                        <span className="font-extrabold text-green-600">{reps}</span>
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">Sets:</span>
+                                        <span className="font-medium">{setsCompleted} / {exercise.sets}</span>
                                     </div>
                                     <div className="flex justify-between">
                                         <span className="text-gray-600">Rest Time:</span>
-                                        <span className="font-semibold text-gray-700">{exercise.rest_seconds} seconds</span>
+                                        <span className="font-medium">{exercise.rest_seconds}s</span>
                                     </div>
                                 </div>
                             </div>
 
-                            {/* REAL-TIME FEEDBACK */}
-                            <div className="bg-white border-2 border-gray-300 rounded-3xl p-6 shadow-xl min-h-[250px] relative">
-                                <h3 className="text-xl font-extrabold text-gray-800 mb-4 border-b pb-2">
-                                    Live Coaching
+                            <div className="bg-white border-2 border-gray-200 rounded-xl p-6">
+                                <h3 className="text-lg font-bold text-gray-900 mb-4">
+                                    Real-Time Feedback
                                 </h3>
-                                <div className="space-y-3 max-h-[300px] overflow-y-auto">
+                                <div className="space-y-3">
                                     {feedback.length > 0 ? (
                                         feedback.map((item, index) => (
                                             <div
                                                 key={index}
-                                                // 🎨 Aesthetic Change: Rounded, bordered feedback boxes
-                                                className={`px-4 py-3 rounded-xl border-2 font-medium text-sm transition-opacity duration-300 ${getFeedbackColor(item.type)}`}
+                                                className={`px-4 py-3 rounded-lg border ${getFeedbackColor(item.type)}`}
                                             >
                                                 {item.message}
                                             </div>
                                         ))
                                     ) : (
-                                        <div className="text-gray-500 text-center py-10 font-medium">
-                                            {isActive ? 'Start moving to begin calibration...' : 'Start the session to receive live coaching.'}
+                                        <div className="text-gray-500 text-sm text-center py-4">
+                                            {isActive ? 'Position yourself in front of the camera...' : 'Start the session to receive feedback'}
                                         </div>
                                     )}
                                 </div>
                             </div>
 
-                            {/* SET COMPLETION BANNER */}
                             {reps >= exercise.target_reps && setsCompleted < exercise.sets && (
-                                <div className="bg-green-100 border-4 border-green-500 rounded-3xl p-6 text-center shadow-2xl animate-bounce">
-                                    <div className="text-3xl font-extrabold text-green-800 mb-3">
-                                        🔥 SET COMPLETE!
+                                <div className="bg-green-50 border-2 border-green-200 rounded-xl p-6 text-center">
+                                    <div className="text-2xl font-bold text-green-800 mb-2">
+                                        YES! Set {setsCompleted + 1} Complete!
                                     </div>
-                                    <p className="text-lg text-green-700 mb-5 font-semibold">
+                                    <p className="text-green-700 mb-4">
                                         Great job! Take a {exercise.rest_seconds} second rest before Set {setsCompleted + 2}.
                                     </p>
                                     <button
                                         onClick={handleSetCompletion}
-                                        className="bg-green-600 text-white px-8 py-3 rounded-full text-lg font-bold hover:bg-green-700 transition-all shadow-lg"
+                                        className="bg-green-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-green-700 transition-all"
                                     >
                                         Start Next Set ({setsCompleted + 1} / {exercise.sets})
                                     </button>
