@@ -51,7 +51,7 @@ export const DownloadPDFButton: React.FC = () => {
         
         try {
             // FIX: Using template literal syntax and BACKEND_URL constant
-            const response = await fetch(`${BACKEND_URL}/pdf/${userId}`, {
+            const response = await fetch(`${BACKEND_URL}/api/pdf/${userId}`, {
                 method: 'GET',
             });
 
