@@ -430,7 +430,7 @@ def build_html_content(data):
 # NEW ENDPOINT: DOWNLOAD PDF REPORT (SIMPLIFIED PATH)
 # -------------------------------------------------------------------------
 
-@app.get("/pdf/{user_id}")  # <-- CHANGED ROUTE HERE
+@app.get("/api/pdf/{user_id}")  # <-- CHANGED ROUTE HERE
 async def download_pdf_report(user_id: str):
     """
     Fetches progress data by calling the get_progress endpoint internally, 
