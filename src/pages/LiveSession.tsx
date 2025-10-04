@@ -96,7 +96,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         "wrist flexion": "/seated-wrist-flexion.gif",
     };
     
-      const audioMap: { [key: string]: HTMLAudioElement } = {
+    // ✅ CORRECTION 1 & 3: Use useMemo for Audio objects and add "Set Completed" key
+    const audioMap = useMemo(() => ({
         "No pose detected. Adjust your camera view.": new Audio("/audio/no_pose.mp3"),
         "I can't see you clearly. Please adjust your position.": new Audio("/audio/low_visibility.mp3"),
         "Please turn sideways or expose one full side.": new Audio("/audio/side_not_visible.mp3"),
@@ -110,8 +111,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         "Controlled movement upward.": new Audio("/audio/controlled_up.mp3"),
         "Calibrating range. Move fully from start to finish position.": new Audio("/audio/calibrating.mp3"),
         "Full repetition completed! Well done.": new Audio("/audio/full_rep.mp3"),
-        "Partial repetition counted. Complete the movement.": new Audio("/audio/partial_rep.mp3")
-    };
+        "Partial repetition counted. Complete the movement.": new Audio("/audio/partial_rep.mp3"),
+        "Set Completed! Take a rest.": new Audio("/audio/set_complete.mp3") // Added key for set completion
+    }), []);
 
     useEffect(()=>{
         if(feedback.length===0) return;
@@ -119,8 +121,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         if(audioMap[latestMessage]){
             audioMap[latestMessage].play().catch(err=>console.warn("Audio play error:",err));
         }
-    }, [feedback])
-
+    }, [feedback, audioMap]) // Added audioMap to dependencies
 
     const exerciseKey = exercise.name.toLowerCase();
     const gifSrc = EXERCISE_GIF_MAP[exerciseKey] || "/default-exercise-guide.gif"; 
@@ -201,7 +202,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
                 angleData: { angle: data.current_angle, A: data.angle_coords.A, B: data.angle_coords.B, C: data.angle_coords.C }
             });
             
-            // ✅ FIX 3: Check for set completion and trigger the transition
+            // ✅ Check for set completion and trigger the transition
             if (data.reps >= exercise.target_reps && setsCompleted < exercise.sets) {
                  // Trigger set completion without saving/stopping the camera prematurely
                  handleSetCompletion(true); 
@@ -236,42 +237,49 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
     };
 
     // --- HANDLE SET COMPLETION ---
-    // ✅ FIX 4: Corrected set completion logic for next set button to appear
+    // ✅ CORRECTION 2: Refined set completion logic for next set button
     const handleSetCompletion = (fromAnalysis: boolean = false) => {
-        if (!fromAnalysis) {
-             // Only save if called from a button, if called from analysis it saves implicitly later
-             saveSessionResult(reps, accuracy, false); 
-        }
-
+        
         const nextSetsCompleted = setsCompleted + 1;
 
-        // Stop the analysis interval immediately if it came from the analysis loop
-        if (intervalRef.current && fromAnalysis) {
-            clearInterval(intervalRef.current);
-            intervalRef.current = null;
+        if (fromAnalysis) {
+             // 1. Triggered by API analysis hitting target reps
+            
+            // Stop the analysis interval immediately 
+            if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+                intervalRef.current = null;
+            }
             setIsActive(false); // Stop processing, wait for the user to click "Next Set"
             setSetsCompleted(nextSetsCompleted);
             
             // Play a set completion sound
-            const completionMessage = "Set"; 
-            audioMap[completionMessage].play().catch(err => console.warn("Set completion audio error:", err));
+            const completionMessage = "Set Completed! Take a rest."; 
+            audioMap[completionMessage]?.play().catch(err => console.warn("Set completion audio error:", err));
         }
 
         if (nextSetsCompleted >= exercise.sets) {
-            // All sets done: stop everything
-            if(!fromAnalysis) stopSession(false, false);
+            // All sets done: stop everything and show modal
+            if(!fromAnalysis) stopSession(true, false); // If button clicked, save the last set results
             setShowCompletionModal(true);
         } else if (!fromAnalysis) {
-            // Start next set immediately if triggered by the "Start Next Set" button
+            // 2. Triggered by the "Start Next Set" button
+            
+            // Save results for the set just finished
+            saveSessionResult(reps, accuracy, false); 
+            
+            // Stop camera/interval cleanly (without completing the entire page)
+            stopSession(false, false); 
+            
+            // Reset state for the new set
             setSetsCompleted(nextSetsCompleted);
             setReps(0);
             setFeedback([]);
             sessionStateRef.current = { reps: 0, stage: 'down', angle: 0, last_rep_time: 0 };
+            
+            // Start the camera/analysis loop for the new set
             startCamera();
-        } else {
-             // If fromAnalysis is true, we just exit, letting the JSX render the "Start Next Set" button
-             // and waiting for the user interaction.
-        }
+        } 
     };
 
 
@@ -289,6 +297,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
     const handleSideChange = (side: 'auto' | 'left' | 'right') => {
         setAnalysisSide(side);
         if (isActive) {
+            // Stop, wait for state update, then restart
             stopSession(false, false);
             setTimeout(startCamera, 500);
         }
@@ -368,7 +377,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
                             {/* NEW: Display the side toggle next to the exercise title */}
                             <div className="mt-2">{SideToggleButton}</div>
                         </div>
-                        <button onClick={() => stopSession(false, true)} className="bg-gray-100 text-gray-700 px-6 py-3 rounded-lg font-medium hover:bg-gray-200 transition-all">
+                        <button onClick={() => stopSession(true, true)} className="bg-gray-100 text-gray-700 px-6 py-3 rounded-lg font-medium hover:bg-gray-200 transition-all">
                             End Session
                         </button>
                     </div>
