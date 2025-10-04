@@ -36,7 +36,7 @@ if not GEMINI_API_KEY:
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 MODEL_NAME = "gemini-1.5-flash" 
 # Use a global dictionary to hold active chat session objects (In-memory history)
-active_chats: Dict[str, Any] = {}
+active_chats: Dict[str, any] = {} # replace with genai.chats next
 # =========================================================================
 
 # =========================================================================
