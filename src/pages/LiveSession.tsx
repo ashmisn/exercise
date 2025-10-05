@@ -2,7 +2,7 @@ import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { Camera, StopCircle, Play, AlertCircle, Award, RotateCw } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
-// --- INTERFACE DEFINITIONS ---
+// --- INTERFACE DEFINITIONS (Remains the same) ---
 interface Exercise {
     name: string;
     description: string;
@@ -30,12 +30,10 @@ const drawLandmarks = (
     height: number
 ) => {
     ctx.clearRect(0, 0, width, height);
-
-    // FIX #1 from earlier: Check if drawingData or landmarks is null/undefined
     if (!drawingData || !drawingData.landmarks) {
         return;
     }
-    
+    // ... (rest of drawLandmarks logic remains the same) ...
     ctx.lineWidth = 4;
     const { landmarks, angleData } = drawingData;
     ctx.strokeStyle = 'rgba(0, 150, 255, 0.9)';
@@ -80,12 +78,15 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
     const drawingCanvasRef = useRef<HTMLCanvasElement>(null);
     const sessionStateRef = useRef<any>({ reps: 0, stage: 'down', angle: 0, last_rep_time: 0 });
     
-    // NEW REF: Tracks the currently playing audio object for interruption
     const currentAudioRef = useRef<HTMLAudioElement | null>(null);
-
-    // 👇 NEW REF: A queue to hold feedback messages waiting to play
     const audioQueueRef = useRef<string[]>([]);
     
+    const [lastFeedbackMessage, setLastFeedbackMessage] = useState<{ message: string; timestamp: number } | null>(null);
+    const FEEDBACK_DEBOUNCE_MS = 3000;
+    
+    // 👇 NEW STATE: Tracks video readiness
+    const [videoLoaded, setVideoLoaded] = useState(false);
+
     const [isActive, setIsActive] = useState(false);
     const [reps, setReps] = useState(0);
     const [feedback, setFeedback] = useState<FeedbackItem[]>([]);
@@ -101,18 +102,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
     const intervalRef = useRef<NodeJs.Timeout | null>(null);
     const PAUSE_TIMEOUT_MS = 5000;
 
-    // --- GIF MAP ---
-    const EXERCISE_GIF_MAP: { [key: string]: string } = {
-        "shoulder flexion": "/standing-shoulder-flexion.gif",
-        "shoulder abduction": "/standing-shoulder-abduction.gif",
-        "elbow flexion": "/seated-elbow-flexion.gif",
-        "elbow extension": "/seated-elbow-extension.gif",
-        "shoulder internal rotation": "/shoulder-internal-rotation.gif",
-        "knee flexion": "/supine-knee-flexion.gif",
-        "ankle dorsiflexion": "/seated-ankle-dorsiflexion.gif",
-        "wrist flexion": "/seated-wrist-flexion.gif",
-    };
-    
     // --- Audio Map (Remains the same) ---
     const audioMap = useMemo(() => ({
         "Hai,Iam Mia i am here to assist you.": new Audio("/audio/intro.mp3"),
@@ -120,7 +109,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         "I can't see you clearly. Please adjust your position.": new Audio("/audio/low_visibility.mp3"),
         "Please turn sideways or expose one full side.": new Audio("/audio/side_not_visible.mp3"),
         "Incomplete return to starting position. Try again.": new Audio("/audio/incomplete_return.mp3"),
-        "Slow down! Move with control.": new Audio("/audio/slow_movement.mp3"),
+        "Slow down! Move with control.": new Audio("/audio/slow_movement.mpool.mp3"),
         "Hold the contracted position at the top.": new Audio("/audio/hold_top.mp3"),
         "Go deeper for a full repetition.": new Audio("/audio/go_deeper.mp3"),
         "Push further to the maximum range.": new Audio("/audio/push_max.mp3"),
@@ -133,56 +122,64 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         "Set Completed! Take a rest.": new Audio("/audio/set_complete.mp3")
     }), []);
     
-    // 👇 NEW UTILITY FUNCTION: Plays the next audio in the queue
+    // --- Audio Playback Logic (Queue and Debounce) ---
     const playNextInQueue = () => {
-        if (currentAudioRef.current) return; // Audio is still playing, wait for onended to call this again
-
-        const nextMessage = audioQueueRef.current.shift(); // Get next message and remove it from queue
-        if (!nextMessage) return; // Queue is empty
+        if (currentAudioRef.current) return; 
+        const nextMessage = audioQueueRef.current.shift();
+        if (!nextMessage) return;
 
         const newAudio = audioMap[nextMessage];
         if (newAudio) {
+            
+            if (
+                lastFeedbackMessage && 
+                lastFeedbackMessage.message === nextMessage && 
+                (Date.now() - lastFeedbackMessage.timestamp < FEEDBACK_DEBOUNCE_MS)
+            ) {
+                playNextInQueue();
+                return;
+            }
+
             currentAudioRef.current = newAudio;
+            setLastFeedbackMessage({ message: nextMessage, timestamp: Date.now() }); 
+            
             newAudio.play().then(() => {
                 newAudio.onended = () => {
                     currentAudioRef.current = null;
-                    playNextInQueue(); // Play next item once this one finishes
+                    playNextInQueue(); 
                 };
             }).catch(err => {
                 console.warn("Audio play error:", err);
                 currentAudioRef.current = null;
-                playNextInQueue(); // Try the next item if this one failed
+                playNextInQueue();
             });
         } else {
-            // If message wasn't in the map, try the next item immediately
             playNextInQueue();
         }
     };
     
-    // 📢 MODIFIED useEffect to push messages to a queue instead of interrupting
     useEffect(()=>{
         if(feedback.length===0) return;
         const latestMessage = feedback[feedback.length-1].message;
         
-        // Always push the latest message to the end of the queue
-        audioQueueRef.current.push(latestMessage);
-        
-        // If nothing is playing, start the queue
-        if (!currentAudioRef.current) {
-            playNextInQueue();
-        }
-        
-    }, [feedback, audioMap]) // NOTE: We rely on feedback state changing, not audioMap
+        const isPriority = ["FULL Rep Completed!", "Partial Rep", "Set Completed!", "Hai,Iam Mia", "Time to calibrate"].some(keyword => latestMessage.includes(keyword));
 
-    // --- Audio Playback Helper (Used for Intro/Calibration/Completion) ---
+        if(isPriority) {
+            playPriorityAudio(latestMessage);
+        } else {
+            audioQueueRef.current.push(latestMessage);
+            if (!currentAudioRef.current) {
+                playNextInQueue();
+            }
+        }
+    }, [feedback, audioMap])
+
     const playPriorityAudio = (message: string) => {
         const audio = audioMap[message];
         if (!audio) return;
 
-        // Clear the non-priority queue completely for priority messages
         audioQueueRef.current = [];
         
-        // Interrupt and reset current audio
         if (currentAudioRef.current) {
             currentAudioRef.current.pause();
             currentAudioRef.current.currentTime = 0;
@@ -190,10 +187,12 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         }
 
         currentAudioRef.current = audio;
+        setLastFeedbackMessage({ message: message, timestamp: Date.now() }); 
+        
         audio.play().then(() => {
             audio.onended = () => {
                 currentAudioRef.current = null;
-                playNextInQueue(); // Start playing any queued messages after priority finishes
+                playNextInQueue(); 
             };
         }).catch(err => {
             console.warn("Priority audio error:", err);
@@ -201,6 +200,17 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         });
     }
 
+    // --- Rest of Component Logic (omitted for brevity) ---
+    const EXERCISE_GIF_MAP: { [key: string]: string } = {
+        "shoulder flexion": "/standing-shoulder-flexion.gif",
+        "shoulder abduction": "/standing-shoulder-abduction.gif",
+        "elbow flexion": "/seated-elbow-flexion.gif",
+        "elbow extension": "/seated-elbow-extension.gif",
+        "shoulder internal rotation": "/shoulder-internal-rotation.gif",
+        "knee flexion": "/supine-knee-flexion.gif",
+        "ankle dorsiflexion": "/seated-ankle-dorsiflexion.gif",
+        "wrist flexion": "/seated-wrist-flexion.gif",
+    };
     const exerciseKey = exercise.name.toLowerCase();
     const gifSrc = EXERCISE_GIF_MAP[exerciseKey] || "/default-exercise-guide.gif";
     const gifDisplayName = exercise.name;
@@ -244,7 +254,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         } catch (err) { console.error('Network error while saving session:', err); }
     };
 
-    // --- CAPTURE & ANALYZE FRAME ---
+    // --- CAPTURE & ANALYZE FRAME (Logic maintained) ---
     const captureAndAnalyze = async () => {
         if (!videoRef.current || !hiddenCanvasRef.current || showCompletionModal) return;
         const canvas = hiddenCanvasRef.current;
@@ -273,12 +283,10 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
             const data = await response.json();
             setLastActivityTime(Date.now());
             
-            // --- AUTOMATIC CALIBRATION AUDIO LOGIC ---
             if (previousReps === 0 && previousFrameCount === 0 && data.state.frame_count > 0 && !hasCalibratedAudioPlayed) {
                 playPriorityAudio("Time to calibrate. Move fully through your exercise range now.");
                 setHasCalibratedAudioPlayed(true);
             }
-            // --- END AUTOMATIC CALIBRATION AUDIO LOGIC ---
 
             sessionStateRef.current = data.state;
             if (data.state.analysis_side && analysisSide === 'auto') setAnalysisSide(data.state.analysis_side);
@@ -299,51 +307,57 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         } catch (err) { console.error('Analysis error:', err); setError('Connection or Analysis Error.'); setDrawingData(null); }
     };
 
-    // --- STOP SESSION ---
+    // --- STOP SESSION (Logic maintained) ---
     const stopSession = (shouldSave: boolean, shouldCompletePage: boolean) => {
         if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
         if (videoRef.current && videoRef.current.srcObject) {
             (videoRef.current.srcObject as MediaStream).getTracks().forEach(track => track.stop());
             videoRef.current.srcObject = null;
         }
-        // Stop any playing audio when the session stops
         if (currentAudioRef.current) {
             currentAudioRef.current.pause();
             currentAudioRef.current.currentTime = 0;
             currentAudioRef.current = null;
         }
-        audioQueueRef.current = []; // Clear the queue too
+        audioQueueRef.current = []; 
+        setVideoLoaded(false); // Reset video state on stop
 
         if (shouldSave) saveSessionResult(sessionStateRef.current.reps, accuracy, shouldCompletePage);
         if (shouldCompletePage) sessionStateRef.current = { reps: 0, stage: 'down', angle: 0, last_rep_time: 0 };
         setDrawingData(null); setIsActive(false);
-        setHasCalibratedAudioPlayed(false); // Reset flag on stop
+        setHasCalibratedAudioPlayed(false); 
         if (shouldCompletePage) onComplete();
     };
 
 
-    // --- START CAMERA (Logic maintained) ---
+    // --- START CAMERA (Modified to include video load handling) ---
     const startCamera = async () => {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
             if (videoRef.current) videoRef.current.srcObject = stream;
             
-            // --- State Resets and Initial Audio ---
+            // Set up listener to capture when video data starts flowing
+            const videoElement = videoRef.current;
+            const handleLoadedData = () => {
+                setVideoLoaded(true); // Set video state to true
+                videoElement?.removeEventListener('loadeddata', handleLoadedData);
+            };
+
+            videoElement?.addEventListener('loadeddata', handleLoadedData);
+            
             setIsActive(true); setError(''); setLastActivityTime(Date.now());
             sessionStateRef.current = { reps: 0, stage: 'down', angle: 0, last_rep_time: 0, frame_count: 0 }; setReps(0); setFeedback([]);
             
-            // 📢 Play the dedicated introduction audio using priority helper
             playPriorityAudio("Hai,Iam Mia i am here to assist you.");
             
             setHasCalibratedAudioPlayed(false);
             
-            // Start processing frames
             intervalRef.current = setInterval(() => captureAndAnalyze(), 500);
             
         } catch (err) { setError('Failed to access camera. Please grant camera permissions.'); }
     };
 
-    // --- HANDLE SET COMPLETION ---
+    // --- HANDLE SET COMPLETION (Logic maintained) ---
     const handleSetCompletion = (fromAnalysis: boolean = false) => {
         
         const nextSetsCompleted = setsCompleted + 1;
@@ -356,7 +370,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
             setIsActive(false);
             setSetsCompleted(nextSetsCompleted);
             
-            // Play set completion sound using priority helper
             playPriorityAudio("Set Completed! Take a rest.");
         }
 
@@ -367,10 +380,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
             
             saveSessionResult(reps, accuracy, false);
             
-            // Stop camera/interval cleanly
             stopSession(false, false);
             
-            // Reset state for the new set
             setSetsCompleted(nextSetsCompleted);
             setReps(0);
             setFeedback([]);
@@ -429,13 +440,13 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
 
     // --- EFFECTS ---
     useEffect(() => {
-        // ✅ FINAL ROBUST CHECK FOR DRAWING: Checks data integrity and video readiness
+        // ✅ FINAL ROBUST CHECK FOR DRAWING: Now dependent on drawingData AND videoLoaded state
         if (
             drawingData && 
             drawingData.landmarks && 
             drawingCanvasRef.current && 
             videoRef.current && 
-            videoRef.current.videoWidth > 0 && // CRUCIAL: Ensures video stream is producing frames
+            videoLoaded && // NEW: Ensure video stream has loaded data
             isActive
         ) {
             const canvas = drawingCanvasRef.current;
@@ -443,15 +454,15 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
             const video = videoRef.current;
             
             if (ctx) { 
+                // Set canvas size using live video dimensions
                 canvas.width = video.videoWidth; 
                 canvas.height = video.videoHeight; 
                 drawLandmarks(ctx, drawingData, canvas.width, canvas.height); 
             }
         } else if (drawingCanvasRef.current) {
-            // Clear the canvas if conditions aren't met
             drawingCanvasRef.current.getContext('2d')?.clearRect(0, 0, drawingCanvasRef.current.width, drawingCanvasRef.current.height);
         }
-    }, [drawingData, isActive]);
+    }, [drawingData, isActive, videoLoaded]); // Added videoLoaded dependency
 
     useEffect(() => { return () => { stopSession(false, false); }; }, []);
 
@@ -537,7 +548,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
                                     <h3 className="font-bold text-gray-800 mb-2">Reference Form</h3>
                                     <p className="text-sm text-gray-600 mb-3">Ensure your body matches the form while exercising.</p>
                                     
-                                    {/* ✅ DYNAMIC GIF SOURCE HERE */}
                                     <img
                                         src={gifSrc}
                                         alt={gifDisplayName}
@@ -632,3 +642,4 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         </div>
     );
 };
+
