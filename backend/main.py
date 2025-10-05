@@ -696,8 +696,9 @@ def predict_recovery(data: PredictionInput):
         raise HTTPException(status_code=500, detail="Model features are missing. Cannot prepare input data.")
 
     try:
-        # 1. Initialize DataFrame with all required features set to 0
-        patient_df = pd.DataFrame(0, index=[0], columns=MODEL_FEATURES)
+        # 1. Initialize DataFrame with all required features set to 0.0 (FLOAT) 
+        # 🟢 FIX for FutureWarning: Use 0.0 instead of 0 to initialize columns as float dtype.
+        patient_df = pd.DataFrame(0.0, index=[0], columns=MODEL_FEATURES)
         
         # 2. Map direct numerical/boolean inputs
         input_dict = data.dict()
@@ -713,7 +714,7 @@ def predict_recovery(data: PredictionInput):
         injury_column_name = f"Injury_{input_dict['Injury_Type']}" 
         
         if injury_column_name in patient_df.columns:
-            patient_df.loc[0, injury_column_name] = 1
+            patient_df.loc[0, injury_column_name] = 1.0 # Set to float 1.0 for consistency
         else:
             # This warning is crucial for debugging mismatches in user input vs. model features
             print(f"Warning: Injury type '{injury_column_name}' not found in model features. Using default zero vector.")
@@ -724,7 +725,8 @@ def predict_recovery(data: PredictionInput):
         # Use predict_median for median recovery time
         median_recovery_time = CPH_MODEL.predict_median(patient_input)
         
-        predicted_days = int(median_recovery_time[0]) 
+        # 🟢 FIX for IndexError: Remove the index [0] to treat the result as a scalar.
+        predicted_days = int(median_recovery_time) 
 
         return {
             "status": "success",
