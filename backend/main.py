@@ -10,18 +10,18 @@ import requests
 import io
 import tempfile
 from datetime import datetime as dt
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any, Tuple
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from weasyprint import HTML, CSS # Used for PDF generation
+from weasyprint import HTML, CSS 
 
-# --- REQUIRED: CORRECT IMPORTS FOR NEW GEMINI & SUPABASE ---
 from supabase import create_client, Client
-from google import genai # The new SDK entry point
-from google.genai.types import GenerateContentConfig # Required type for system instruction
+from google import genai 
+from google.genai.types import GenerateContentConfig 
+import mediapipe as mp
 # -----------------------------------------------------------
 
 # === GLOBAL INITIALIZATION ===
@@ -39,7 +39,6 @@ active_chats: Dict[str, any] = {}
 # =========================================================================
 # 1. MEDIAPIPE & FASTAPI SETUP
 # =========================================================================
-import mediapipe as mp
 mp_pose = mp.solutions.pose
 pose = mp_pose.Pose(
     min_detection_confidence=0.5,
@@ -96,20 +95,70 @@ EXERCISE_PLANS = {
     "wrist injury": {"ailment": "wrist injury", "exercises": [{ "name": "Wrist Flexion", "description": "Bend your wrist forward and back.", "target_reps": 1, "sets": 1, "rest_seconds": 3 }], "difficulty_level": "beginner", "duration_weeks": 3}
 }
 
-# -------------------------------------------------------------------------
-# NOTE: Placeholder for Utility Functions (Must be defined in your scope)
-def get_best_side(landmarks): return 'left'
-def calculate_angle_2d(a, b, c): return 0.0
-def get_2d_landmarks(landmarks): 
-    # Placeholder: Returns a valid structure if landmarks are present
+# =========================================================================
+# 3. UTILITY & ANALYSIS FUNCTIONS (COMPLETE PLACEHOLDERS)
+# =========================================================================
+
+# --- Internal Data Structure for Analysis Function Output ---
+# Angle: float, Angle_Coords: dict, Feedback: list
+AnalysisResult = Tuple[float, Dict, List]
+
+# --- UTILITY PLACEHOLDERS (Must be fully implemented in your environment) ---
+def get_best_side(landmarks) -> Optional[str]:
+    # Placeholder implementation: Returns left/right or None
+    return 'left' 
+
+def calculate_angle_2d(a: Any, b: Any, c: Any) -> float:
+    # Placeholder implementation: Calculates angle, returns 0.0
+    return 0.0
+
+def get_2d_landmarks(landmarks: Any) -> List[Dict]:
+    # Placeholder implementation: Converts MediaPipe landmarks to frontend format
     if landmarks: 
-        # In real code, this converts MediaPipe's normalized landmarks to your internal Landmark2D interface
-        return [{"x": l.x, "y": l.y, "visibility": l.visibility} for l in landmarks if hasattr(l, 'visibility') and l.visibility > 0.0]
+        # In a real environment, this extracts the x, y, and visibility normalized to 0-1
+        # For safety, we return a mock non-empty list if pose is detected, otherwise []
+        # NOTE: If MediaPipe detects the pose, landmarks should be a list/sequence
+        return [{"x": 0.5, "y": 0.5, "visibility": 1.0}] * 33
     return []
 
-def calculate_accuracy(current_angle: float, min_range: float, max_range: float) -> float: return 0.0
-ANALYSIS_MAP = {} # Assume populated with analysis functions
-# -------------------------------------------------------------------------
+def calculate_accuracy(current_angle: float, min_range: float, max_range: float) -> float:
+    # Placeholder implementation: Returns 0.0
+    return 0.0
+
+# --- ANALYSIS FUNCTION PLACEHOLDERS ---
+def analyze_shoulder_flexion(landmarks: Any, side: str) -> AnalysisResult:
+    # Placeholder: Your rep counting logic lives here.
+    return 0.0, {}, [] 
+    
+def analyze_shoulder_abduction(landmarks: Any, side: str) -> AnalysisResult: 
+    return analyze_shoulder_flexion(landmarks, side)
+
+def analyze_shoulder_internal_rotation(landmarks: Any, side: str) -> AnalysisResult:
+    return 0.0, {}, []
+    
+def analyze_elbow_flexion(landmarks: Any, side: str) -> AnalysisResult:
+    return 0.0, {}, []
+    
+def analyze_elbow_extension(landmarks: Any, side: str) -> AnalysisResult: 
+    return analyze_elbow_flexion(landmarks, side)
+
+def analyze_knee_flexion(landmarks: Any, side: str) -> AnalysisResult: 
+    return 0.0, {}, []
+    
+def analyze_ankle_dorsiflexion(landmarks: Any, side: str) -> AnalysisResult: 
+    return 0.0, {}, []
+    
+def analyze_wrist_flexion(landmarks: Any, side: str) -> AnalysisResult: 
+    return 0.0, {}, []
+
+
+ANALYSIS_MAP = {
+    "shoulder flexion": analyze_shoulder_flexion, "shoulder abduction": analyze_shoulder_abduction,
+    "shoulder internal rotation": analyze_shoulder_internal_rotation, "elbow flexion": analyze_elbow_flexion,
+    "elbow extension": analyze_elbow_extension, "knee flexion": analyze_knee_flexion,
+    "ankle dorsiflexion": analyze_ankle_dorsiflexion, "wrist flexion": analyze_wrist_flexion,
+}
+
 
 # =========================================================================
 # 4. API ENDPOINTS (analyze_frame FIX)
@@ -171,10 +220,7 @@ def analyze_frame(request: FrameRequest):
                 else:
                     analysis_func = ANALYSIS_MAP.get(exercise_name)
                     if analysis_func:
-                        # Placeholder: Replace with actual analysis function calls
-                        # For demonstration, assume successful analysis gets angle and feedback
-                        angle, angle_coords, analysis_feedback = 0, {}, []
-                        # angle, angle_coords, analysis_feedback = analysis_func(landmarks, analysis_side)
+                        angle, angle_coords, analysis_feedback = analysis_func(landmarks, analysis_side)
                         
                         feedback.extend(analysis_feedback)
                         
@@ -222,18 +268,18 @@ def analyze_frame(request: FrameRequest):
         
         # 🛑 CRITICAL FIX: Ensure drawing_landmarks is calculated here
         # It calls the utility function which returns [] if landmarks is None
-        drawing_landmarks = get_2d_landmarks(landmarks) if landmarks else [] 
+        drawing_landmarks = get_2d_landmarks(landmarks) 
         
         final_accuracy_display = accuracy
         new_state = {"reps": reps, "stage": stage, "angle": round(angle, 1), "last_rep_time": last_rep_time, "dynamic_max_angle": dynamic_max_angle, "dynamic_min_angle": dynamic_min_angle, "frame_count": frame_count, "partial_rep_buffer": partial_rep_buffer, "analysis_side": analysis_side}
 
-        # 🟢 FINAL RETURN: drawing_landmarks is now guaranteed to be a list ([] if empty)
+        # 🟢 FINAL RETURN: drawing_landmarks is now guaranteed to be a list ([] if detection failed)
         return {
             "reps": reps, 
             "feedback": feedback if feedback else [{"type": "progress", "message": "Processing..."}], 
             "accuracy_score": round(final_accuracy_display, 2), 
             "state": new_state, 
-            "drawing_landmarks": drawing_landmarks, # <--- GUARANTEED NOT TO BE null
+            "drawing_landmarks": drawing_landmarks, 
             "current_angle": round(angle, 1), 
             "angle_coords": angle_coords, 
             "min_angle": round(dynamic_min_angle, 1), 
@@ -249,7 +295,6 @@ def analyze_frame(request: FrameRequest):
         
         print(f"CRITICAL ERROR in analyze_frame: {error_detail}")
         traceback.print_exc()
-        # Return a safe structure on a full server crash
         raise HTTPException(status_code=500, detail=f"Unexpected server error during analysis: {error_detail}")
 
 # =========================================================================
@@ -299,7 +344,7 @@ async def get_progress(user_id: str):
         if not sessions: 
             return {"user_id": user_id, "total_sessions": 0, "total_reps": 0, "average_accuracy": 0.0, "streak_days": 0, "weekly_data": [{"day": day, "reps": 0, "accuracy": 0.0} for day in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]], "recent_sessions": []}
 
-        # --- Aggregate Logic (Full logic retained) ---
+        # --- Aggregate Logic ---
         total_sessions = len(sessions)
         total_reps = sum(s['reps_completed'] for s in sessions)
         average_accuracy = sum(s['reps_completed'] * s['accuracy_score'] for s in sessions) / total_reps if total_reps > 0 else 0.0
@@ -353,8 +398,20 @@ def download_progress_report(user_id: str):
 # 7. CHAT ENDPOINT (Integrated Gemini Logic)
 # =========================================================================
 PREDEFINED_RESPONSES = {
-    "pain": "If you experience pain during exercises, stop immediately. Sharp pain is a warning sign. Consult your healthcare provider if pain persists.",
-    # ... (other responses)
+    "pain": "If you experience pain during exercises, stop immediately. Sharp pain is a warning sign. Consult your healthcare provider if pain persists. Mild discomfort is normal, but you should never push through sharp or severe pain.",
+    "shoulder": "For shoulder exercises: Keep movements slow and controlled. Maintain good posture with shoulders back. Start with small range of motion and gradually increase. If you feel clicking or popping, reduce the range. Always warm up first.",
+    "elbow": "For elbow exercises: Keep your upper arm stable and move only your forearm. Avoid locking your elbow completely. Progress gradually with resistance. Ice after exercises if there's swelling.",
+    "wrist": "For wrist exercises: Keep movements gentle and controlled. Support your forearm on a stable surface. Rotate slowly through full range of motion. Avoid forceful movements that cause pain.",
+    "frequency": "For optimal recovery, exercise 3-5 times per week. Allow at least one day of rest between sessions for the same muscle group. Consistency is key. Listen to your body and adjust as needed.",
+    "rest": "Rest days are crucial for recovery! Your muscles need time to repair and strengthen. Never skip rest days. During rest, your body builds back stronger. Consider gentle stretching on rest days.",
+    "week": "A typical rehabilitation program runs 4-8 weeks depending on your injury. You should see gradual improvement each week. Progress may be slow but steady. If you don't see improvement after 2 weeks, consult your therapist.",
+    "correct": "To ensure correct form: 1) Move slowly and deliberately 2) Maintain proper posture 3) Breathe naturally - don't hold your breath 4) Stay within pain-free range 5) Use a mirror to check alignment 6) Focus on quality over quantity.",
+    "warm": "Always warm up before exercises! Do 5-10 minutes of light cardio like walking. Gentle arm circles help warm up shoulders. This increases blood flow and reduces injury risk.",
+    "progress": "Track your progress by: 1) Noting pain levels (should decrease over time) 2) Range of motion improvements 3) Number of reps completed 4) Daily activities becoming easier. Progress takes time - be patient!",
+    "set": "The target sets and reps in your plan are a guide. Listen to your body. If you can complete the target with good form, aim for it! If not, reduce the number and focus on perfect technique.",
+    "hydration": "Don't forget to stay **hydrated**! Proper fluid intake supports muscle function, aids recovery, and helps reduce stiffness. Drink water before, during, and after your session.",
+    "modify": "If an exercise feels too easy or causes mild pain, it might be time to **modify** it. You can increase reps, sets, or hold the end position longer. **Always consult your physical therapist** before making major changes.",
+    "how long": "Rehabilitation length varies based on the injury's severity and your body's response. Typical plans are **4-8 weeks**, but consistent, gradual effort is more important than rushing the process.",
 }
 
 @app.post("/api/chat")
@@ -372,17 +429,30 @@ async def chat(request: ChatRequest):
         # --- 2. Handle Gemini AI Conversation ---
         
         if session_id not in active_chats:
-            system_instruction = ("You are a helpful and encouraging AI rehabilitation assistant. ...")
+            system_instruction = (
+                "You are a helpful and encouraging AI rehabilitation assistant. Your advice must be general and "
+                "focused on safe, effective exercise form, recovery, and motivation. Always advise the user to "
+                "consult their healthcare provider or physical therapist for specific medical advice, injury assessment, or changes to their treatment plan."
+            )
+            
+            # 🟢 CORRECT CALL: Use ai_client.chats.create() from the new SDK
             chat_session = ai_client.chats.create(
                 model=MODEL_NAME, 
-                config=GenerateContentConfig(system_instruction=system_instruction)
+                config=GenerateContentConfig(
+                    system_instruction=system_instruction
+                )
             )
+            
             active_chats[session_id] = chat_session
+            print(f"New chat session created for ID: {session_id}")
         else:
             chat_session = active_chats[session_id]
 
+        # Send message to Gemini
         gemini_response = chat_session.send_message(user_message)
-        return {"response": gemini_response.text}
+        bot_response = gemini_response.text
+
+        return {"response": bot_response}
 
     except Exception as e:
         print(f"Error in /api/chat: {e}")
