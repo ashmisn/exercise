@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState } from 'react';
 import { Clock, TrendingUp, AlertTriangle, Activity } from 'lucide-react';
 
 // --- Configuration ---
 const BACKEND_URL = 'https://exercise-7edj.onrender.com';
 
-// The injury types correspond to the one-hot encoded columns in your backend model
+// CRITICAL FIX: The 'value' must EXACTLY match the case-sensitive suffix 
+// of the backend's Injury_X features (e.g., "Injury_Ankle injury" uses "Ankle injury").
 const INJURY_OPTIONS = [
+    // Mixed/Title Case features from your list:
     { label: "Ankle Injury", value: "Ankle injury" },
     { label: "Back Injury", value: "Back injury" },
     { label: "Calf Injury", value: "Calf injury" },
@@ -13,11 +15,23 @@ const INJURY_OPTIONS = [
     { label: "Shoulder Injury", value: "Shoulder injury" },
     { label: "Hamstring Strain", value: "Hamstring strain" },
     { label: "Groin Injury", value: "Groin injury" },
-    { label: "Illness (Ill)", value: "Ill" },
+    { label: "Illness", value: "Ill" }, 
     { label: "Foot Injury", value: "Foot injury" },
     { label: "Knee Surgery", value: "Knee surgery" },
-    { label: "Minor Bruise", value: "bruise" },
+    { label: "Knock", value: "Knock" }, 
+    { label: "Coronavirus", value: "Coronavirus" }, 
+    
+    // Lowercase features from your list (important for matching!)
+    { label: "Ankle Injury (lowercased)", value: "ankle injury" },
+    { label: "Minor Bruise (lowercased)", value: "bruise" },
+    { label: "Calf Injury (lowercased)", value: "calf injury" },
+    { label: "Groin Injury (lowercased)", value: "groin injury" },
+    { label: "Hamstring Injury (lowercased)", value: "hamstring injury" }, // Added
+    { label: "Hamstring Strain (lowercased)", value: "hamstring strain" }, // Duplicate value, but explicit for safety
+    { label: "Illness (lowercased)", value: "ill" }, // Duplicate value, but explicit for safety
+    { label: "Knee Injury (lowercased)", value: "knee injury" },
     { label: "Muscle Injury", value: "muscle injury" },
+    { label: "Unknown Injury", value: "unknown injury" },
 ];
 
 const initialInput = {
@@ -36,30 +50,34 @@ const initialInput = {
 
 const RecoveryPredictor = () => {
     const [input, setInput] = useState(initialInput);
-    const [prediction, setPrediction] = useState<number | null>(null);
+    const [prediction, setPrediction] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const handleChange = (e) => {
         const { name, value, type } = e.target;
         
-        let processedValue: string | number | boolean = value;
+        let processedValue = value;
 
         if (type === 'number') {
             // Convert to number for float/int fields
-            processedValue = parseFloat(value) || 0;
+            // Use Number() for better handling of empty string input
+            processedValue = Number(value) || 0; 
+            // Ensure integer fields are truly integers
             if (name === 'Complication_count' || name === 'Previous_injury') {
                 processedValue = parseInt(value) || 0;
             }
         }
+        
+        // 🟢 FIX: Centralized checkbox logic
         if (type === 'checkbox') {
-            processedValue = (e.target as HTMLInputElement).checked ? 1 : 0;
+            processedValue = e.target.checked ? 1 : 0;
         }
 
         setInput(prev => ({ ...prev, [name]: processedValue }));
     };
 
-    const handlePrediction = async (e: React.FormEvent) => {
+    const handlePrediction = async (e) => {
         e.preventDefault();
         setError('');
         setPrediction(null);
@@ -71,18 +89,19 @@ const RecoveryPredictor = () => {
             setLoading(false);
             return;
         }
+        
+        // Ensure integer fields are correctly typed before sending
+        const payload = {
+            Age: input.Age,
+            Health_Score: input.Health_Score,
+            Physio_adherence: input.Physio_adherence,
+            Complication_count: parseInt(input.Complication_count),
+            Inflammation_marker: input.Inflammation_marker,
+            Previous_injury: parseInt(input.Previous_injury),
+            Injury_Type: input.Injury_Type,
+        };
 
         try {
-            const payload = {
-                Age: input.Age,
-                Health_Score: input.Health_Score,
-                Physio_adherence: input.Physio_adherence,
-                Complication_count: input.Complication_count,
-                Inflammation_marker: input.Inflammation_marker,
-                Previous_injury: input.Previous_injury,
-                Injury_Type: input.Injury_Type,
-            };
-
             const response = await fetch(`${BACKEND_URL}/api/predict_recovery`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -91,21 +110,22 @@ const RecoveryPredictor = () => {
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ detail: 'Unknown Server Error' }));
-                throw new Error(errorData.detail || 'Prediction failed due to server error.');
+                console.error("Server Error Response:", errorData);
+                throw new Error(errorData.detail || `Prediction failed with status ${response.status}.`);
             }
 
             const data = await response.json();
             setPrediction(data.median_recovery_days);
 
-        } catch (err: any) {
+        } catch (err) {
             console.error("Prediction Error:", err);
-            setError(err.message || "Failed to get prediction. Check server connection.");
+            setError(err.message || "Failed to get prediction. Check backend URL and service status.");
         } finally {
             setLoading(false);
         }
     };
 
-    const inputClasses = "w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150";
+    const inputClasses = "w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150";
     const labelClasses = "block text-sm font-medium text-gray-700 mb-1";
 
     return (
@@ -136,9 +156,7 @@ const RecoveryPredictor = () => {
                             <div>
                                 <label htmlFor="Age" className={labelClasses}>Age (Years)</label>
                                 <input
-                                    type="number"
-                                    id="Age"
-                                    name="Age"
+                                    type="number" id="Age" name="Age"
                                     value={input.Age}
                                     onChange={handleChange}
                                     className={inputClasses}
@@ -151,9 +169,7 @@ const RecoveryPredictor = () => {
                             <div>
                                 <label htmlFor="Health_Score" className={labelClasses}>Health Score (0.0 - 10.0)</label>
                                 <input
-                                    type="number"
-                                    id="Health_Score"
-                                    name="Health_Score"
+                                    type="number" id="Health_Score" name="Health_Score"
                                     value={input.Health_Score}
                                     onChange={handleChange}
                                     className={inputClasses}
@@ -166,9 +182,7 @@ const RecoveryPredictor = () => {
                             <div>
                                 <label htmlFor="Physio_adherence" className={labelClasses}>Physio Adherence (0.0 - 1.0)</label>
                                 <input
-                                    type="number"
-                                    id="Physio_adherence"
-                                    name="Physio_adherence"
+                                    type="number" id="Physio_adherence" name="Physio_adherence"
                                     value={input.Physio_adherence}
                                     onChange={handleChange}
                                     className={inputClasses}
@@ -177,13 +191,11 @@ const RecoveryPredictor = () => {
                                 />
                             </div>
 
-                             {/* Inflammation_marker */}
-                             <div>
+                            {/* Inflammation_marker */}
+                            <div>
                                 <label htmlFor="Inflammation_marker" className={labelClasses}>Inflammation Marker Score</label>
                                 <input
-                                    type="number"
-                                    id="Inflammation_marker"
-                                    name="Inflammation_marker"
+                                    type="number" id="Inflammation_marker" name="Inflammation_marker"
                                     value={input.Inflammation_marker}
                                     onChange={handleChange}
                                     className={inputClasses}
@@ -196,9 +208,7 @@ const RecoveryPredictor = () => {
                             <div>
                                 <label htmlFor="Complication_count" className={labelClasses}>Complication Count</label>
                                 <input
-                                    type="number"
-                                    id="Complication_count"
-                                    name="Complication_count"
+                                    type="number" id="Complication_count" name="Complication_count"
                                     value={input.Complication_count}
                                     onChange={handleChange}
                                     className={inputClasses}
@@ -211,8 +221,7 @@ const RecoveryPredictor = () => {
                             <div>
                                 <label htmlFor="Injury_Type" className={labelClasses}>Current Injury Type</label>
                                 <select
-                                    id="Injury_Type"
-                                    name="Injury_Type"
+                                    id="Injury_Type" name="Injury_Type"
                                     value={input.Injury_Type}
                                     onChange={handleChange}
                                     className={inputClasses}
@@ -233,7 +242,8 @@ const RecoveryPredictor = () => {
                                     id="Previous_injury"
                                     name="Previous_injury"
                                     checked={input.Previous_injury === 1}
-                                    onChange={(e) => setInput(prev => ({...prev, Previous_injury: e.target.checked ? 1 : 0}))}
+                                    // 🟢 FIX: Call the general handler
+                                    onChange={handleChange}
                                     className="h-5 w-5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
                                 />
                                 <label htmlFor="Previous_injury" className="ml-3 text-sm font-medium text-gray-700">
