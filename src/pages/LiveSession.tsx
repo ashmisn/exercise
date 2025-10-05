@@ -31,9 +31,9 @@ const drawLandmarks = (
 ) => {
     ctx.clearRect(0, 0, width, height);
 
-    // ✅ FIX: Check if drawingData or landmarks is null/undefined (Prevents the original TypeError)
+    // FIX #1 from earlier: Check if drawingData or landmarks is null/undefined
     if (!drawingData || !drawingData.landmarks) {
-        return; // Safely exit if pose data (landmarks) is missing
+        return;
     }
     
     ctx.lineWidth = 4;
@@ -80,15 +80,18 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
     const drawingCanvasRef = useRef<HTMLCanvasElement>(null);
     const sessionStateRef = useRef<any>({ reps: 0, stage: 'down', angle: 0, last_rep_time: 0 });
     
-    // 👇 NEW REF: Tracks the currently playing audio object for interruption
+    // NEW REF: Tracks the currently playing audio object for interruption
     const currentAudioRef = useRef<HTMLAudioElement | null>(null);
 
+    // 👇 NEW REF: A queue to hold feedback messages waiting to play
+    const audioQueueRef = useRef<string[]>([]);
+    
     const [isActive, setIsActive] = useState(false);
     const [reps, setReps] = useState(0);
     const [feedback, setFeedback] = useState<FeedbackItem[]>([]);
     const [accuracy, setAccuracy] = useState(0);
-    const [error, setError] = useState('');
     const [drawingData, setDrawingData] = useState<DrawingData | null>(null);
+    const [error, setError] = useState('');
     const [analysisSide, setAnalysisSide] = useState<'auto' | 'left' | 'right'>('auto');
     const [setsCompleted, setSetsCompleted] = useState(0);
     const [showCompletionModal, setShowCompletionModal] = useState(false);
@@ -110,7 +113,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         "wrist flexion": "/seated-wrist-flexion.gif",
     };
     
-    // --- Audio Map ---
+    // --- Audio Map (Remains the same) ---
     const audioMap = useMemo(() => ({
         "Hai,Iam Mia i am here to assist you.": new Audio("/audio/intro.mp3"),
         "No pose detected. Adjust your camera view.": new Audio("/audio/no_pose.mp3"),
@@ -129,37 +132,74 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
         "Partial repetition counted. Complete the movement.": new Audio("/audio/partial_rep.mp3"),
         "Set Completed! Take a rest.": new Audio("/audio/set_complete.mp3")
     }), []);
+    
+    // 👇 NEW UTILITY FUNCTION: Plays the next audio in the queue
+    const playNextInQueue = () => {
+        if (currentAudioRef.current) return; // Audio is still playing, wait for onended to call this again
 
-    // 📢 MODIFIED useEffect to enforce single playback
+        const nextMessage = audioQueueRef.current.shift(); // Get next message and remove it from queue
+        if (!nextMessage) return; // Queue is empty
+
+        const newAudio = audioMap[nextMessage];
+        if (newAudio) {
+            currentAudioRef.current = newAudio;
+            newAudio.play().then(() => {
+                newAudio.onended = () => {
+                    currentAudioRef.current = null;
+                    playNextInQueue(); // Play next item once this one finishes
+                };
+            }).catch(err => {
+                console.warn("Audio play error:", err);
+                currentAudioRef.current = null;
+                playNextInQueue(); // Try the next item if this one failed
+            });
+        } else {
+            // If message wasn't in the map, try the next item immediately
+            playNextInQueue();
+        }
+    };
+    
+    // 📢 MODIFIED useEffect to push messages to a queue instead of interrupting
     useEffect(()=>{
         if(feedback.length===0) return;
         const latestMessage = feedback[feedback.length-1].message;
-        const newAudio = audioMap[latestMessage];
         
-        if(newAudio){
-            // 1. Stop any currently playing audio
-            if (currentAudioRef.current) {
-                currentAudioRef.current.pause();
-                currentAudioRef.current.currentTime = 0; // Rewind for next time
-            }
-
-            // 2. Play the new audio
-            newAudio.play().then(() => {
-                 // 3. Update the ref with the currently playing audio
-                currentAudioRef.current = newAudio;
-                
-                // 4. Clear the ref once the audio is finished playing
-                newAudio.onended = () => {
-                    if (currentAudioRef.current === newAudio) {
-                        currentAudioRef.current = null;
-                    }
-                };
-            }).catch(err => {
-                console.warn("Audio play error:",err);
-                currentAudioRef.current = null; // Clear ref on failure
-            });
+        // Always push the latest message to the end of the queue
+        audioQueueRef.current.push(latestMessage);
+        
+        // If nothing is playing, start the queue
+        if (!currentAudioRef.current) {
+            playNextInQueue();
         }
-    }, [feedback, audioMap])
+        
+    }, [feedback, audioMap]) // NOTE: We rely on feedback state changing, not audioMap
+
+    // --- Audio Playback Helper (Used for Intro/Calibration/Completion) ---
+    const playPriorityAudio = (message: string) => {
+        const audio = audioMap[message];
+        if (!audio) return;
+
+        // Clear the non-priority queue completely for priority messages
+        audioQueueRef.current = [];
+        
+        // Interrupt and reset current audio
+        if (currentAudioRef.current) {
+            currentAudioRef.current.pause();
+            currentAudioRef.current.currentTime = 0;
+            currentAudioRef.current = null;
+        }
+
+        currentAudioRef.current = audio;
+        audio.play().then(() => {
+            audio.onended = () => {
+                currentAudioRef.current = null;
+                playNextInQueue(); // Start playing any queued messages after priority finishes
+            };
+        }).catch(err => {
+            console.warn("Priority audio error:", err);
+            currentAudioRef.current = null;
+        });
+    }
 
     const exerciseKey = exercise.name.toLowerCase();
     const gifSrc = EXERCISE_GIF_MAP[exerciseKey] || "/default-exercise-guide.gif";
@@ -235,21 +275,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
             
             // --- AUTOMATIC CALIBRATION AUDIO LOGIC ---
             if (previousReps === 0 && previousFrameCount === 0 && data.state.frame_count > 0 && !hasCalibratedAudioPlayed) {
-                const calibrationMessage = "Time to calibrate. Move fully through your exercise range now.";
-                // 📢 Use the same audio interruption logic here
-                if (currentAudioRef.current) {
-                    currentAudioRef.current.pause();
-                    currentAudioRef.current.currentTime = 0;
-                }
-                const calibrationAudio = audioMap[calibrationMessage];
-                calibrationAudio?.play().then(() => {
-                    currentAudioRef.current = calibrationAudio;
-                    calibrationAudio.onended = () => {
-                        if (currentAudioRef.current === calibrationAudio) {
-                            currentAudioRef.current = null;
-                        }
-                    };
-                }).catch(err => console.warn("Calibration audio error:", err));
+                playPriorityAudio("Time to calibrate. Move fully through your exercise range now.");
                 setHasCalibratedAudioPlayed(true);
             }
             // --- END AUTOMATIC CALIBRATION AUDIO LOGIC ---
@@ -280,12 +306,13 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
             (videoRef.current.srcObject as MediaStream).getTracks().forEach(track => track.stop());
             videoRef.current.srcObject = null;
         }
-        // 📢 Stop any playing audio when the session stops
+        // Stop any playing audio when the session stops
         if (currentAudioRef.current) {
             currentAudioRef.current.pause();
             currentAudioRef.current.currentTime = 0;
             currentAudioRef.current = null;
         }
+        audioQueueRef.current = []; // Clear the queue too
 
         if (shouldSave) saveSessionResult(sessionStateRef.current.reps, accuracy, shouldCompletePage);
         if (shouldCompletePage) sessionStateRef.current = { reps: 0, stage: 'down', angle: 0, last_rep_time: 0 };
@@ -305,21 +332,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
             setIsActive(true); setError(''); setLastActivityTime(Date.now());
             sessionStateRef.current = { reps: 0, stage: 'down', angle: 0, last_rep_time: 0, frame_count: 0 }; setReps(0); setFeedback([]);
             
-            // 📢 Play the dedicated introduction audio immediately, with interruption logic
-            if (currentAudioRef.current) {
-                currentAudioRef.current.pause();
-                currentAudioRef.current.currentTime = 0;
-            }
-            const introMessage = "Hai,Iam Mia i am here to assist you.";
-            const introAudio = audioMap[introMessage];
-            introAudio?.play().then(() => {
-                currentAudioRef.current = introAudio;
-                introAudio.onended = () => {
-                    if (currentAudioRef.current === introAudio) {
-                        currentAudioRef.current = null;
-                    }
-                };
-            }).catch(err => console.warn("Intro audio error:", err));
+            // 📢 Play the dedicated introduction audio using priority helper
+            playPriorityAudio("Hai,Iam Mia i am here to assist you.");
             
             setHasCalibratedAudioPlayed(false);
             
@@ -342,21 +356,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
             setIsActive(false);
             setSetsCompleted(nextSetsCompleted);
             
-            // Play set completion sound, with interruption logic
-            if (currentAudioRef.current) {
-                currentAudioRef.current.pause();
-                currentAudioRef.current.currentTime = 0;
-            }
-            const completionMessage = "Set Completed! Take a rest.";
-            const completionAudio = audioMap[completionMessage];
-            completionAudio?.play().then(() => {
-                 currentAudioRef.current = completionAudio;
-                 completionAudio.onended = () => {
-                    if (currentAudioRef.current === completionAudio) {
-                        currentAudioRef.current = null;
-                    }
-                };
-            }).catch(err => console.warn("Set completion audio error:", err));
+            // Play set completion sound using priority helper
+            playPriorityAudio("Set Completed! Take a rest.");
         }
 
         if (nextSetsCompleted >= exercise.sets) {
@@ -428,17 +429,34 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ exercise, onComplete }
 
     // --- EFFECTS ---
     useEffect(() => {
-        if (drawingData && drawingCanvasRef.current && isActive) {
+        // ✅ FINAL ROBUST CHECK FOR DRAWING: Checks data integrity and video readiness
+        if (
+            drawingData && 
+            drawingData.landmarks && 
+            drawingCanvasRef.current && 
+            videoRef.current && 
+            videoRef.current.videoWidth > 0 && // CRUCIAL: Ensures video stream is producing frames
+            isActive
+        ) {
             const canvas = drawingCanvasRef.current;
-            const ctx = canvas.getContext('2d'); const video = videoRef.current;
-            if (ctx && video) { canvas.width = video.videoWidth; canvas.height = video.videoHeight; drawLandmarks(ctx, drawingData, canvas.width, canvas.height); }
-        } else if (drawingCanvasRef.current) drawingCanvasRef.current.getContext('2d')?.clearRect(0, 0, drawingCanvasRef.current.width, drawingCanvasRef.current.height);
+            const ctx = canvas.getContext('2d'); 
+            const video = videoRef.current;
+            
+            if (ctx) { 
+                canvas.width = video.videoWidth; 
+                canvas.height = video.videoHeight; 
+                drawLandmarks(ctx, drawingData, canvas.width, canvas.height); 
+            }
+        } else if (drawingCanvasRef.current) {
+            // Clear the canvas if conditions aren't met
+            drawingCanvasRef.current.getContext('2d')?.clearRect(0, 0, drawingCanvasRef.current.width, drawingCanvasRef.current.height);
+        }
     }, [drawingData, isActive]);
 
     useEffect(() => { return () => { stopSession(false, false); }; }, []);
 
 
-    // --- RENDER ---
+    // --- RENDER (REMAINS THE SAME) ---
     if (showCompletionModal) {
         return (
             <div className="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 p-4">
