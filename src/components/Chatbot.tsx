@@ -28,7 +28,7 @@ export const Chatbot: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
-      text: 'Hello! I\'m your AI rehabilitation assistant. How can I help you with your exercises today? (My Gemini integration allows me to remember what you\'ve said!)',
+      text: 'Wanna ask me something?',
       sender: 'bot',
       timestamp: new Date(),
     },
