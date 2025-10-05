@@ -1,12 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, ArrowRight, CheckCircle, Download, Monitor, TrendingUp, Clock, Calendar, User } from 'lucide-react';
+import { Activity, ArrowRight, CheckCircle, Download, Monitor, TrendingUp, Clock, Calendar, User, Clock as ClockIcon } from 'lucide-react';
+// FIX: Corrected import paths from '../../' to '../' 
 import { useAuth } from '../contexts/AuthContext'; 
 import { Chatbot } from '../components/Chatbot'; 
+import RecoveryPredictor from '../components/RecoveryPredictor'; 
 
-// --- Interface Definitions (Omitted for brevity) ---
-interface Exercise { name: string; description: string; target_reps: number; sets: number; rest_seconds: number; }
-interface ExercisePlan { ailment: string; exercises: Exercise[]; difficulty_level: string; duration_weeks: number; }
-interface HomeProps { onStartSession: (plan: ExercisePlan, exercise: Exercise) => void; }
+// --- Interface Definitions ---
+interface Exercise {
+  name: string;
+  description: string;
+  target_reps: number;
+  sets: number;
+  rest_seconds: number;
+}
+
+interface ExercisePlan {
+  ailment: string;
+  exercises: Exercise[];
+  difficulty_level: string;
+  duration_weeks: number;
+}
+
+interface HomeProps {
+  onStartSession: (plan: ExercisePlan, exercise: Exercise) => void;
+}
 
 // --- Configuration ---
 const BACKEND_URL = 'https://exercise-7edj.onrender.com';
@@ -18,6 +35,7 @@ const AILMENTS = [
   { value: 'leg/knee injury', label: 'Leg/Knee Injury', icon: '🦵' },
 ];
 
+// Mock data for the Dashboard 
 const MOCK_PROGRESS = {
   totalReps: 1240,
   avgAccuracy: 92.5,
@@ -36,6 +54,18 @@ export const Home: React.FC<HomeProps> = ({ onStartSession }) => {
   const [exercisePlan, setExercisePlan] = useState<ExercisePlan | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  
+  // NEW STATE: User profile information
+  const [userProfile, setUserProfile] = useState({
+    name: 'Patient Name',
+    age: 30,
+    height: 175, // cm
+    weight: 75,  // kg
+    existingAilments: 'None',
+  });
+
+  // NEW STATE: Controls which view is currently displayed
+  const [currentView, setCurrentView] = useState<'dashboard' | 'predictor' | 'profile'>('dashboard');
 
   // --- API Handlers ---
   const handleGetPlan = async () => {
@@ -68,7 +98,6 @@ export const Home: React.FC<HomeProps> = ({ onStartSession }) => {
     }
   };
 
-  // ✅ FIXED FUNCTION: Robust PDF Download Handler
   const handleDownloadPDF = async () => {
     if (!user?.id) {
       console.warn('User ID missing for PDF download.');
@@ -83,34 +112,24 @@ export const Home: React.FC<HomeProps> = ({ onStartSession }) => {
       });
 
       if (!response.ok) {
-        // Handle non-OK status gracefully
         const text = await response.text();
         let errorMessage = `Failed to fetch PDF. Server status: ${response.status}`;
         try {
-            // Attempt to parse JSON error message from backend
             const errorData = JSON.parse(text);
             errorMessage = errorData.detail || errorMessage;
-        } catch {
-            // Ignore if not JSON, use default status message
-        }
+        } catch { /* response was not JSON */ }
         throw new Error(errorMessage);
       }
 
-      // 1. Get the raw blob from the response
       const blob = await response.blob();
-      
-      // 2. CRUCIAL FIX: Create a new Blob explicitly defining the type as application/pdf
-      // This ensures the browser treats the downloaded data as a PDF, regardless of server headers.
       const pdfBlob = new Blob([blob], { type: 'application/pdf' }); 
       
-      // 3. Check Content-Disposition for filename (optional but best practice)
       const contentDisposition = response.headers.get('Content-Disposition');
       let filename = `rehab_report_${user.id}.pdf`;
       if (contentDisposition && contentDisposition.indexOf('filename=') !== -1) {
           filename = contentDisposition.split('filename=')[1].replace(/"/g, '');
       }
       
-      // 4. Trigger download
       const url = window.URL.createObjectURL(pdfBlob); 
       const a = document.createElement('a');
       a.href = url;
@@ -119,17 +138,92 @@ export const Home: React.FC<HomeProps> = ({ onStartSession }) => {
       a.click();
       a.remove();
       window.URL.revokeObjectURL(url);
-      
-      // Successfully cleared error state
+
     } catch (err: any) {
       console.error('Download failed', err);
       setError(`Could not download PDF report: ${err.message}.`);
     }
   };
-  // ----------------------------------------
+  
+  // --- Profile Input Handler ---
+  const handleProfileChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value, type } = e.target;
+    setUserProfile(prev => ({
+        ...prev,
+        [name]: (type === 'number' ? parseFloat(value) : value)
+    }));
+  };
+  
+  // --- View Rendering ---
+  
+  // View 1: Prediction Form
+  if (currentView === 'predictor') {
+    return (
+        <div className="min-h-screen bg-gray-50 py-10 px-4 sm:px-6 lg:px-8">
+            <div className="max-w-4xl mx-auto">
+                <button 
+                    onClick={() => setCurrentView('dashboard')}
+                    className="mb-6 flex items-center text-indigo-600 hover:text-indigo-800 font-medium transition-colors"
+                >
+                    &larr; Back to Dashboard
+                </button>
+                <RecoveryPredictor />
+            </div>
+        </div>
+    );
+  }
+  
+  // View 2: Profile Edit Form
+  if (currentView === 'profile') {
+    const inputClasses = "w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150";
+    const labelClasses = "block text-sm font-medium text-gray-700 mb-1";
+      
+      return (
+          <div className="min-h-screen bg-gray-50 py-10 px-4 sm:px-6 lg:px-8">
+              <div className="max-w-xl mx-auto bg-white rounded-3xl shadow-2xl p-8 border-t-8 border-blue-500">
+                  <h2 className="text-3xl font-bold text-gray-900 mb-6">Edit User Profile</h2>
+                  
+                  <div className="space-y-6">
+                      <div>
+                          <label htmlFor="name" className={labelClasses}>Full Name</label>
+                          <input type="text" id="name" name="name" value={userProfile.name} onChange={handleProfileChange} className={inputClasses} required />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                          <div>
+                              <label htmlFor="age" className={labelClasses}>Age (Years)</label>
+                              <input type="number" id="age" name="age" value={userProfile.age} onChange={handleProfileChange} className={inputClasses} min="1" max="100" />
+                          </div>
+                          <div>
+                              <label htmlFor="height" className={labelClasses}>Height (cm)</label>
+                              <input type="number" id="height" name="height" value={userProfile.height} onChange={handleProfileChange} className={inputClasses} min="50" />
+                          </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                          <div>
+                              <label htmlFor="weight" className={labelClasses}>Weight (kg)</label>
+                              <input type="number" id="weight" name="weight" value={userProfile.weight} onChange={handleProfileChange} className={inputClasses} min="20" />
+                          </div>
+                          <div>
+                              <label htmlFor="existingAilments" className={labelClasses}>Existing Ailments (Comma Separated)</label>
+                              <input type="text" id="existingAilments" name="existingAilments" value={userProfile.existingAilments} onChange={handleProfileChange} className={inputClasses} placeholder="e.g., Asthma, Mild Arthritis" />
+                          </div>
+                      </div>
+                      <button
+                          onClick={() => setCurrentView('dashboard')}
+                          className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-all shadow-lg"
+                      >
+                          Save Profile & Back to Dashboard
+                      </button>
+                  </div>
+              </div>
+          </div>
+      );
+  }
 
-  // --- Render ---
+
+  // Default: Dashboard View
   return (
+    // 1. Aesthetic Background: Soft gradients and rounded corners
     <div className="min-h-screen bg-gray-50 font-sans p-4 md:p-8">
       <div className="max-w-7xl mx-auto">
         {/* Header Section */}
@@ -142,11 +236,43 @@ export const Home: React.FC<HomeProps> = ({ onStartSession }) => {
               AI Rehab Dashboard
             </h1>
           </div>
-          <div className="flex items-center text-gray-700 font-medium">
+          {/* Display User Name and Email */}
+          <div className="flex items-center text-gray-700 font-medium cursor-pointer" onClick={() => setCurrentView('profile')}>
             <User className="w-5 h-5 mr-2 text-indigo-500" />
-            <span>{user?.email || 'Guest User'}</span>
+            <span>{userProfile.name} ({user?.email || 'Guest'})</span>
           </div>
         </header>
+        
+        {/* --- User Profile Card --- */}
+        <div className="bg-white rounded-3xl shadow-lg p-6 mb-8 border-l-8 border-indigo-300">
+            <div className="flex justify-between items-center mb-3">
+                <h3 className="text-xl font-bold text-gray-800">Patient Data</h3>
+                <button 
+                    onClick={() => setCurrentView('profile')} 
+                    className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+                >
+                    Edit Profile
+                </button>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div className="text-gray-600">
+                    <span className="font-semibold text-gray-900 block">{userProfile.age}</span>
+                    Age
+                </div>
+                <div className="text-gray-600">
+                    <span className="font-semibold text-gray-900 block">{userProfile.height} cm</span>
+                    Height
+                </div>
+                <div className="text-gray-600">
+                    <span className="font-semibold text-gray-900 block">{userProfile.weight} kg</span>
+                    Weight
+                </div>
+                <div className="text-gray-600 md:col-span-1">
+                    <span className="font-semibold text-gray-900 block truncate">{userProfile.existingAilments || 'None'}</span>
+                    Existing Ailments
+                </div>
+            </div>
+        </div>
 
         {/* 2. Main Dashboard Grid */}
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
@@ -296,6 +422,15 @@ export const Home: React.FC<HomeProps> = ({ onStartSession }) => {
             <h2 className="text-2xl font-bold text-gray-800 tracking-tight">
               My Progress Summary
             </h2>
+            
+            {/* NEW BUTTON: Recovery Predictor Link */}
+            <button
+                onClick={() => setCurrentView('predictor')}
+                className="w-full bg-indigo-500 text-white px-5 py-3 rounded-xl hover:bg-indigo-600 flex items-center justify-center gap-2 transition-all shadow-xl transform hover:scale-[1.01]"
+            >
+                <ClockIcon className="w-5 h-5" />
+                Estimate Recovery Time
+            </button>
             
             <div className="bg-white rounded-3xl shadow-xl p-6 border-l-4 border-teal-500">
                 <p className="text-lg font-medium text-gray-800 mb-4">Latest Achievement</p>

@@ -8,4 +8,6 @@ python-multipart==0.0.6
 requests
 weasyprint
 supabase
+scikit-learn
+joblib  
 google-genai

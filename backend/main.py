@@ -22,6 +22,9 @@ from supabase import create_client, Client
 from google import genai 
 from google.genai.types import GenerateContentConfig 
 import mediapipe as mp
+
+import joblib
+import pandas as pd
 # -----------------------------------------------------------
 
 # === GLOBAL INITIALIZATION ===
@@ -36,6 +39,7 @@ ai_client = genai.Client(api_key=GEMINI_API_KEY)
 MODEL_NAME = "gemini-2.5-flash" 
 active_chats: Dict[str, any] = {} 
 
+
 # =========================================================================
 # 1. MEDIAPIPE & FASTAPI SETUP
 # =========================================================================
@@ -44,6 +48,7 @@ pose = mp_pose.Pose(
     min_detection_confidence=0.5,
     min_tracking_confidence=0.5
 )
+
 
 app = FastAPI(title="AI Physiotherapy API")
 
@@ -496,6 +501,82 @@ async def chat(request: ChatRequest):
         print(f"Error in /api/chat: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"An AI or Server error occurred: {str(e)}")
+
+MODEL_PATH = 'model/cph_model.joblib'
+# ...
+CPH_MODEL = joblib.load(MODEL_PATH)
+        
+class PredictionInput(BaseModel):
+    # Core numerical inputs
+    Age: float = Field(..., description="Patient's age.")
+    Health_Score: float = Field(..., description="General health rating (0.0 to 10.0).")
+    Physio_adherence: float = Field(..., description="Compliance with rehab plan (0.0 to 1.0).")
+    Complication_count: int = Field(..., description="Number of minor complications/setbacks.")
+    Inflammation_marker: float = Field(..., description="Inflammation score.")
+    Previous_injury: int = Field(0, description="1 if patient has previous injuries, 0 otherwise.")
+    
+    # Dynamic categorical input (must be mapped to Injury_X columns later)
+    # E.g., 'Hamstring strain', 'Knee injury'
+    Injury_Type: str = Field(..., description="The current type of injury.") 
+
+AnalysisResult = Tuple[float, Dict, List]
+
+
+@app.post("/api/predict_recovery")
+def predict_recovery(data: PredictionInput):
+    """
+    Predicts the median recovery time in days using the loaded CPH model.
+    The input data is mapped to the model's feature space (including one-hot encoding).
+    """
+    if CPH_MODEL is None:
+        raise HTTPException(status_code=503, detail="Prediction model is not available or failed to load.")
+    
+    if not MODEL_FEATURES:
+         raise HTTPException(status_code=500, detail="Model features are missing. Cannot prepare input data.")
+
+    try:
+        # 1. Initialize DataFrame with all required features set to 0
+        patient_df = pd.DataFrame(0, index=[0], columns=MODEL_FEATURES)
+        
+        # 2. Map direct numerical/boolean inputs
+        input_dict = data.dict()
+        
+        for feature in ["Age", "Health_Score", "Physio_adherence", "Complication_count", "Inflammation_marker", "Previous_injury"]:
+            if feature in patient_df.columns:
+                patient_df.loc[0, feature] = input_dict[feature]
+                
+        # 3. Handle the categorical 'Injury Type' (One-Hot Encoding)
+        injury_column_name = f"Injury_{input_dict['Injury_Type']}"
+        if injury_column_name in patient_df.columns:
+            patient_df.loc[0, injury_column_name] = 1
+        else:
+            print(f"Warning: Injury type '{injury_column_name}' not found in model features. Using default zero vector.")
+        
+        # 4. Make Prediction
+        # Ensure we only pass the columns the model expects
+        patient_input = patient_df[MODEL_FEATURES]
+        
+        # Use predict_median for median recovery time
+        median_recovery_time = CPH_MODEL.predict_median(patient_input)
+        
+        # NOTE: This returns a SurvivalFunction object which typically needs [0]
+        predicted_days = int(median_recovery_time[0]) 
+
+        # We can also predict the survival function if needed for visualization (optional)
+        # survival_function = loaded_cph.predict_survival_function(patient_input)
+
+        return {
+            "status": "success",
+            "median_recovery_days": predicted_days
+        }
+
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Prediction processing failed: {str(e)}")
+
+
+
+
 
 # =========================================================================
 # 8. MAIN EXECUTION
