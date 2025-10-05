@@ -28,7 +28,7 @@ export const Chatbot: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
-      text: 'Wanna ask me something?',
+      text: 'Ask Away!',
       sender: 'bot',
       timestamp: new Date(),
     },
