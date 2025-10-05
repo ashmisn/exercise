@@ -21,6 +21,11 @@ from .reports import generate_pdf_report
 from .constants import EXERCISE_CONFIGS, EXERCISE_PLANS, PREDEFINED_RESPONSES
 
 # ----- Schemas -----
+class Landmark2D(BaseModel):
+    x: float
+    y: float
+    visibility: float = 1.0
+
 class FrameRequest(BaseModel):
     frame: str
     exercise_name: str
