@@ -501,6 +501,7 @@ def build_html_content(data):
 from starlette.background import BackgroundTask 
 
 @app.get("/api/pdf/{user_id}")
+@app.get("/api/pdf/{user_id}")
 async def download_pdf_report(user_id: str):
     """
     Generates a PDF report and returns it for download, deleting the temp file afterwards.
@@ -510,11 +511,15 @@ async def download_pdf_report(user_id: str):
     
     try:
         # 1. Get aggregated data (Success logic assumed)
-        data = get_progress(user_id) 
+        # 🟢 CRITICAL FIX: Add 'await' before calling the asynchronous function get_progress
+        data = await get_progress(user_id) 
+        
+        # Now 'data' is the dictionary result, and .get("total_sessions") will work.
         if data.get("total_sessions") == 0:
             raise HTTPException(status_code=404, detail="No session data found for this user to generate a report.")
 
         # 2. Generate PDF using WeasyPrint
+        # NOTE: You'll need to define build_html_content somewhere else in your code
         html_content = build_html_content(data)
         HTML(string=html_content).write_pdf(PDF_FILENAME)
 
@@ -527,7 +532,7 @@ async def download_pdf_report(user_id: str):
             media_type='application/pdf', 
             filename=PDF_FILENAME, 
             headers=headers,
-            # *** CRITICAL FIX: Add background task for cleanup ***
+            # Ensure BackgroundTask and os are imported (from fastapi.background import BackgroundTask)
             background=BackgroundTask(os.remove, PDF_FILENAME) 
         )
 
