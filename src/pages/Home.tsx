@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Activity, ArrowRight, CheckCircle, Download, Monitor, TrendingUp, Clock, Calendar, User } from 'lucide-react';
 // FIX: Adjusted paths to assume components and contexts are siblings to pages/Home.tsx, 
 // or in a directory structure relative to the project root.
-import { useAuth } from '../../../contexts/AuthContext'; 
-import { Chatbot } from '../../../components/Chatbot'; 
+import { useAuth } from '../contexts/AuthContext'; 
+import { Chatbot } from '../contexts/Chatbot'; 
 
 // --- Interface Definitions ---
 interface Exercise {
