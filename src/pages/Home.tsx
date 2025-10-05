@@ -1,29 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Activity, ArrowRight, CheckCircle, Download, Monitor, TrendingUp, Clock, Calendar, User } from 'lucide-react';
-// FIX: Adjusted paths to assume components and contexts are siblings to pages/Home.tsx, 
-// or in a directory structure relative to the project root.
 import { useAuth } from '../contexts/AuthContext'; 
 import { Chatbot } from '../components/Chatbot'; 
 
-// --- Interface Definitions ---
-interface Exercise {
-  name: string;
-  description: string;
-  target_reps: number;
-  sets: number;
-  rest_seconds: number;
-}
-
-interface ExercisePlan {
-  ailment: string;
-  exercises: Exercise[];
-  difficulty_level: string;
-  duration_weeks: number;
-}
-
-interface HomeProps {
-  onStartSession: (plan: ExercisePlan, exercise: Exercise) => void;
-}
+// --- Interface Definitions (Omitted for brevity) ---
+interface Exercise { name: string; description: string; target_reps: number; sets: number; rest_seconds: number; }
+interface ExercisePlan { ailment: string; exercises: Exercise[]; difficulty_level: string; duration_weeks: number; }
+interface HomeProps { onStartSession: (plan: ExercisePlan, exercise: Exercise) => void; }
 
 // --- Configuration ---
 const BACKEND_URL = 'https://exercise-7edj.onrender.com';
@@ -35,7 +18,6 @@ const AILMENTS = [
   { value: 'leg/knee injury', label: 'Leg/Knee Injury', icon: '🦵' },
 ];
 
-// Mock data for the Dashboard (This would normally come from the /api/progress endpoint)
 const MOCK_PROGRESS = {
   totalReps: 1240,
   avgAccuracy: 92.5,
@@ -68,9 +50,7 @@ export const Home: React.FC<HomeProps> = ({ onStartSession }) => {
     try {
       const response = await fetch(`${BACKEND_URL}/api/get_plan`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ailment: selectedAilment }),
       });
 
@@ -88,37 +68,68 @@ export const Home: React.FC<HomeProps> = ({ onStartSession }) => {
     }
   };
 
+  // ✅ FIXED FUNCTION: Robust PDF Download Handler
   const handleDownloadPDF = async () => {
     if (!user?.id) {
       console.warn('User ID missing for PDF download.');
+      setError('Login required to download report.');
       return;
     }
+    setError('');
 
     try {
       const response = await fetch(`${BACKEND_URL}/api/pdf/${user.id}`, {
         method: 'GET',
       });
 
-      if (!response.ok) throw new Error('Failed to fetch PDF');
+      if (!response.ok) {
+        // Handle non-OK status gracefully
+        const text = await response.text();
+        let errorMessage = `Failed to fetch PDF. Server status: ${response.status}`;
+        try {
+            // Attempt to parse JSON error message from backend
+            const errorData = JSON.parse(text);
+            errorMessage = errorData.detail || errorMessage;
+        } catch {
+            // Ignore if not JSON, use default status message
+        }
+        throw new Error(errorMessage);
+      }
 
+      // 1. Get the raw blob from the response
       const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
+      
+      // 2. CRUCIAL FIX: Create a new Blob explicitly defining the type as application/pdf
+      // This ensures the browser treats the downloaded data as a PDF, regardless of server headers.
+      const pdfBlob = new Blob([blob], { type: 'application/pdf' }); 
+      
+      // 3. Check Content-Disposition for filename (optional but best practice)
+      const contentDisposition = response.headers.get('Content-Disposition');
+      let filename = `rehab_report_${user.id}.pdf`;
+      if (contentDisposition && contentDisposition.indexOf('filename=') !== -1) {
+          filename = contentDisposition.split('filename=')[1].replace(/"/g, '');
+      }
+      
+      // 4. Trigger download
+      const url = window.URL.createObjectURL(pdfBlob); 
       const a = document.createElement('a');
       a.href = url;
-      a.download = `rehab_report_${user.id}.pdf`;
+      a.download = filename; 
       document.body.appendChild(a);
       a.click();
       a.remove();
       window.URL.revokeObjectURL(url);
-    } catch (err) {
+      
+      // Successfully cleared error state
+    } catch (err: any) {
       console.error('Download failed', err);
-      setError('Could not download PDF. Try again later.');
+      setError(`Could not download PDF report: ${err.message}.`);
     }
   };
+  // ----------------------------------------
 
   // --- Render ---
   return (
-    // 1. Aesthetic Background: Soft gradients and rounded corners
     <div className="min-h-screen bg-gray-50 font-sans p-4 md:p-8">
       <div className="max-w-7xl mx-auto">
         {/* Header Section */}
