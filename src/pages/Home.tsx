@@ -3,7 +3,7 @@ import { Activity, ArrowRight, CheckCircle, Download, Monitor, TrendingUp, Clock
 // FIX: Adjusted paths to assume components and contexts are siblings to pages/Home.tsx, 
 // or in a directory structure relative to the project root.
 import { useAuth } from '../contexts/AuthContext'; 
-import { Chatbot } from '../contexts/Chatbot'; 
+import { Chatbot } from '../components/Chatbot'; 
 
 // --- Interface Definitions ---
 interface Exercise {
