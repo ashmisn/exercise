@@ -1,18 +1,12 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  // --- EXISTING VITE SETUP ---
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+  
   theme: {
-    extend: {},
-  },
-  plugins: [],
-};
-// tailwind.config.js
-
-module.exports = {
-  // ... other configurations (content, darkMode, etc.)
-  theme: {
+    // --- CUSTOM EXTENSIONS ARE MERGED HERE ---
     extend: {
-      // 1. Define the 'blob' keyframes for movement and scaling
+      // 1. Define the 'blob' keyframes
       keyframes: {
         blob: {
           '0%, 100%': {
@@ -30,12 +24,14 @@ module.exports = {
       animation: {
         'blob': 'blob 7s infinite cubic-bezier(0.4, 0, 0.6, 1)',
       },
-      // 3. Define a custom shadow (if you can't use arbitrary values in CSS)
-      // This is less common but necessary for the specific aesthetic
+      // 3. Define the custom shadow utility
       boxShadow: {
-        'inner-custom': 'inset 0 2px 4px 0 rgba(0, 0, 0, 0.2)', // A light inner shadow
+        // This shadow definition corresponds to the 'shadow-inner-custom' class
+        'inner-custom': 'inset 0 2px 4px 0 rgba(0, 0, 0, 0.1), inset 0 0 10px rgba(255, 255, 255, 0.15)',
       },
     },
   },
-  // ... plugins
-}
+  
+  // --- EXISTING VITE SETUP ---
+  plugins: [],
+};
