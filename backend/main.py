@@ -501,11 +501,25 @@ async def chat(request: ChatRequest):
         print(f"Error in /api/chat: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"An AI or Server error occurred: {str(e)}")
-
 MODEL_PATH = 'model/cph_model.joblib'
 # ...
 CPH_MODEL = joblib.load(MODEL_PATH)
-        
+
+# 🛑 CRITICAL FIX: Define the global list of MODEL_FEATURES 
+MODEL_FEATURES = [
+    "Age", "Health_Score", "Injury_Ankle injury", "Injury_Back injury", 
+    "Injury_Calf injury", "Injury_Coronavirus", "Injury_Foot injury", 
+    "Injury_Groin injury", "Injury_Hamstring injury", "Injury_Hamstring strain", 
+    "Injury_Ill", "Injury_Knee injury", "Injury_Knee surgery", "Injury_Knock", 
+    "Injury_Shoulder injury", "Injury_ankle injury", "Injury_bruise", 
+    "Injury_calf injury", "Injury_groin injury", "Injury_hamstring injury", 
+    "Injury_hamstring strain", "Injury_ill", "Injury_knee injury", 
+    "Injury_muscle injury", "Injury_unknown injury", "Previous_injury", 
+    "Physio_adherence", "Complication_count", "Inflammation_marker"
+]
+# Note: You should check if "Previous_injury" is expected as a float or int by your model, 
+# and ensure the features match your model's expectation.
+
 class PredictionInput(BaseModel):
     # Core numerical inputs
     Age: float = Field(..., description="Patient's age.")
@@ -532,7 +546,8 @@ def predict_recovery(data: PredictionInput):
         raise HTTPException(status_code=503, detail="Prediction model is not available or failed to load.")
     
     if not MODEL_FEATURES:
-         raise HTTPException(status_code=500, detail="Model features are missing. Cannot prepare input data.")
+        # This check will now pass since MODEL_FEATURES is defined above.
+        raise HTTPException(status_code=500, detail="Model features are missing. Cannot prepare input data.")
 
     try:
         # 1. Initialize DataFrame with all required features set to 0
@@ -541,29 +556,29 @@ def predict_recovery(data: PredictionInput):
         # 2. Map direct numerical/boolean inputs
         input_dict = data.dict()
         
+        # The list of features here is correct:
         for feature in ["Age", "Health_Score", "Physio_adherence", "Complication_count", "Inflammation_marker", "Previous_injury"]:
             if feature in patient_df.columns:
                 patient_df.loc[0, feature] = input_dict[feature]
                 
         # 3. Handle the categorical 'Injury Type' (One-Hot Encoding)
-        injury_column_name = f"Injury_{input_dict['Injury_Type']}"
+        # ⚠️ IMPORTANT: The user input 'Injury_Type' must exactly match one of the injury suffixes 
+        # (e.g., if the user sends "Ankle injury", it must match "Injury_Ankle injury" in the list).
+        injury_column_name = f"Injury_{input_dict['Injury_Type']}" 
+        
         if injury_column_name in patient_df.columns:
             patient_df.loc[0, injury_column_name] = 1
         else:
+            # This warning is crucial for debugging mismatches in user input vs. model features
             print(f"Warning: Injury type '{injury_column_name}' not found in model features. Using default zero vector.")
         
         # 4. Make Prediction
-        # Ensure we only pass the columns the model expects
         patient_input = patient_df[MODEL_FEATURES]
         
         # Use predict_median for median recovery time
         median_recovery_time = CPH_MODEL.predict_median(patient_input)
         
-        # NOTE: This returns a SurvivalFunction object which typically needs [0]
         predicted_days = int(median_recovery_time[0]) 
-
-        # We can also predict the survival function if needed for visualization (optional)
-        # survival_function = loaded_cph.predict_survival_function(patient_input)
 
         return {
             "status": "success",
@@ -573,10 +588,6 @@ def predict_recovery(data: PredictionInput):
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Prediction processing failed: {str(e)}")
-
-
-
-
 
 # =========================================================================
 # 8. MAIN EXECUTION
