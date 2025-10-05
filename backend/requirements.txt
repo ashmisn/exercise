@@ -11,3 +11,4 @@ supabase
 scikit-learn
 joblib  
 google-genai
+pandas
