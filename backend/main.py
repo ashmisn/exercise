@@ -142,10 +142,11 @@ def get_exercise_plan(request: AilmentRequest):
 @app.post("/api/analyze_frame")
 def analyze_frame(request: FrameRequest):
     global pose
+    
     reps, stage, last_rep_time = 0, "down", 0
     angle, angle_coords, feedback, accuracy = 0, {}, [], 0.0
     DEFAULT_STATE = {"reps": 0, "stage": "down", "last_rep_time": 0, "dynamic_max_angle": 0, "dynamic_min_angle": 180, "frame_count": 0, "partial_rep_buffer": 0.0, "analysis_side": None}
-
+    
     current_state = {**DEFAULT_STATE, **(request.previous_state or {})}
     reps = current_state["reps"]
     stage = current_state["stage"]
@@ -157,7 +158,7 @@ def analyze_frame(request: FrameRequest):
     analysis_side = current_state["analysis_side"]
 
     landmarks = None
-    drawing_landmarks = []
+    drawing_landmarks = [] # Initialize to empty list
 
     try:
         header, encoded = request.frame.split(',', 1) if ',' in request.frame else ('', request.frame)
@@ -170,14 +171,14 @@ def analyze_frame(request: FrameRequest):
 
         image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = pose.process(image_rgb)
-
+        
         if not results.pose_landmarks:
             feedback.append({"type": "warning", "message": "No pose detected. Adjust camera view."})
         else:
             landmarks = results.pose_landmarks.landmark
             exercise_name = request.exercise_name.lower()
             if analysis_side is None: analysis_side = get_best_side(landmarks)
-
+            
             if analysis_side is None:
                 feedback.append({"type": "warning", "message": "Please turn sideways or expose one full side."})
             else:
@@ -186,58 +187,73 @@ def analyze_frame(request: FrameRequest):
                 else:
                     analysis_func = ANALYSIS_MAP.get(exercise_name)
                     if analysis_func:
+                        # Note: The 'analysis_func' and 'calculate_accuracy' must be fully implemented
+                        # for the angle and accuracy values to be meaningful.
                         angle, angle_coords, analysis_feedback = analysis_func(landmarks, analysis_side)
+                        
                         feedback.extend(analysis_feedback)
+                        
                         if not analysis_feedback:
                             CALIBRATION_FRAMES, DEBOUNCE_TIME = config['calibration_frames'], config['debounce']
                             current_time = time.time()
+                            
                             if frame_count < CALIBRATION_FRAMES and reps == 0:
                                 dynamic_max_angle = max(dynamic_max_angle, angle)
                                 dynamic_min_angle = min(dynamic_min_angle, angle)
                                 frame_count += 1
                                 feedback.append({"type": "progress", "message": f"Calibrating range ({frame_count}/{CALIBRATION_FRAMES}). Move fully from start to finish position."})
                                 accuracy = 0.0
+                                
                             if frame_count >= CALIBRATION_FRAMES or reps > 0:
                                 CALIBRATED_MIN_ANGLE, CALIBRATED_MAX_ANGLE = dynamic_min_angle, dynamic_max_angle
                                 MIN_ANGLE_THRESHOLD_FULL, MAX_ANGLE_THRESHOLD_FULL = CALIBRATED_MIN_ANGLE + 5, CALIBRATED_MAX_ANGLE - 5
                                 MIN_ANGLE_THRESHOLD_PARTIAL, MAX_ANGLE_THRESHOLD_PARTIAL = CALIBRATED_MIN_ANGLE + 20, CALIBRATED_MAX_ANGLE - 20
+                                
+                                # Assuming calculate_accuracy returns a decimal (0.0 to 1.0)
                                 frame_accuracy = calculate_accuracy(angle, CALIBRATED_MIN_ANGLE, CALIBRATED_MAX_ANGLE)
                                 accuracy = frame_accuracy
+
                                 if angle < MIN_ANGLE_THRESHOLD_PARTIAL:
                                     stage = "up"
                                     feedback.append({"type": "instruction", "message": "Hold contracted position at the top!" if angle < MIN_ANGLE_THRESHOLD_FULL else "Go deeper for a full rep."})
+                                
                                 if angle > MAX_ANGLE_THRESHOLD_PARTIAL and stage == "up":
                                     if current_time - last_rep_time > DEBOUNCE_TIME:
                                         rep_amount = 0.0
                                         if angle > MAX_ANGLE_THRESHOLD_FULL: rep_amount, success_message = 1.0, "FULL Rep Completed! Well done."
                                         else: rep_amount, success_message = 0.5, "Partial Rep (50%) counted. Complete the movement."
+                                        
                                         if rep_amount > 0:
                                             stage, partial_rep_buffer, last_rep_time = "down", partial_rep_buffer + rep_amount, current_time
                                             if partial_rep_buffer >= 1.0: reps, partial_rep_buffer = reps + int(partial_rep_buffer), partial_rep_buffer % 1.0
                                             feedback.append({"type": "encouragement", "message": f"{success_message} Total reps: {reps}"})
                                         else: feedback.append({"type": "warning", "message": "Incomplete return to starting position."})
                                     else: feedback.append({"type": "warning", "message": "Slow down! Ensure controlled return."})
+                                
                                 if not any(f['type'] in ['warning', 'instruction', 'encouragement'] for f in feedback):
                                     if stage == 'up' and angle > MIN_ANGLE_THRESHOLD_FULL: feedback.append({"type": "progress", "message": "Push further to the maximum range."})
                                     elif stage == 'down' and angle < MAX_ANGLE_THRESHOLD_FULL: feedback.append({"type": "progress", "message": "Return fully to the starting position."})
                                     elif stage == 'down': feedback.append({"type": "progress", "message": "Ready to start the next rep."})
                                     elif stage == 'up': feedback.append({"type": "progress", "message": "Controlled movement upward."})
                     else: feedback.append({"type": "warning", "message": "Analysis function missing."})
-
-        drawing_landmarks = get_2d_landmarks(landmarks)
-        final_accuracy_display = accuracy
+        
+        drawing_landmarks = get_2d_landmarks(landmarks) 
+        
+        # 🟢 FIX: Convert accuracy from a decimal (e.g., 0.95) to a percentage (e.g., 95.0)
+        final_accuracy_display = accuracy * 100
+        
         new_state = {"reps": reps, "stage": stage, "angle": round(angle, 1), "last_rep_time": last_rep_time, "dynamic_max_angle": dynamic_max_angle, "dynamic_min_angle": dynamic_min_angle, "frame_count": frame_count, "partial_rep_buffer": partial_rep_buffer, "analysis_side": analysis_side}
 
         return {
-            "reps": reps,
-            "feedback": feedback if feedback else [{"type": "progress", "message": "Processing..."}],
-            "accuracy_score": round(final_accuracy_display, 2),
-            "state": new_state,
-            "drawing_landmarks": drawing_landmarks,
-            "current_angle": round(angle, 1),
-            "angle_coords": angle_coords,
-            "min_angle": round(dynamic_min_angle, 1),
-            "max_angle": round(dynamic_max_angle, 1),
+            "reps": reps, 
+            "feedback": feedback if feedback else [{"type": "progress", "message": "Processing..."}], 
+            "accuracy_score": round(final_accuracy_display, 2), 
+            "state": new_state, 
+            "drawing_landmarks": drawing_landmarks, 
+            "current_angle": round(angle, 1), 
+            "angle_coords": angle_coords, 
+            "min_angle": round(dynamic_min_angle, 1), 
+            "max_angle": round(dynamic_max_angle, 1), 
             "side": analysis_side
         }
 
@@ -246,6 +262,7 @@ def analyze_frame(request: FrameRequest):
         if "Packet timestamp mismatch" in error_detail or "CalculatorGraph::Run() failed" in error_detail:
             print(f"Handled MediaPipe Timestamp Error: {error_detail}")
             raise HTTPException(status_code=400, detail="Transient analysis error. Please try again.")
+        
         print(f"CRITICAL ERROR in analyze_frame: {error_detail}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Unexpected server error during analysis: {error_detail}")
