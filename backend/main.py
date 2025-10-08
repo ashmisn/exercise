@@ -141,98 +141,145 @@ def get_exercise_plan(request: AilmentRequest):
 
 @app.post("/api/analyze_frame")
 def analyze_frame(request: FrameRequest):
-    reps, stage, last_rep_time = 0, "down", 0
-    angle, angle_coords, feedback, accuracy = 0, {}, [], 0.0
-    DEFAULT_STATE = {"reps": 0, "stage": "down", "last_rep_time": 0, "dynamic_max_angle": 0, "dynamic_min_angle": 180, "frame_count": 0, "partial_rep_buffer": 0.0, "analysis_side": None}
+    # --- State Initialization ---
+    DEFAULT_STATE = {
+        "reps": 0, "stage": "down", "last_rep_time": 0, 
+        "dynamic_max_angle": 0, "dynamic_min_angle": 180, 
+        "frame_count": 0, "partial_rep_buffer": 0.0, 
+        "analysis_side": None, "calibrated": False # NEW: Calibration status flag
+    }
     current_state = request.previous_state or DEFAULT_STATE
-    reps, stage, last_rep_time = current_state.get("reps", 0), current_state.get("stage", "down"), current_state.get("last_rep_time", 0)
-    dynamic_max_angle, dynamic_min_angle = current_state.get("dynamic_max_angle", 0), current_state.get("dynamic_min_angle", 180)
-    frame_count, partial_rep_buffer = current_state.get("frame_count", 0), current_state.get("partial_rep_buffer", 0.0)
+    
+    # Unpack state variables for clarity
+    reps = current_state.get("reps", 0)
+    stage = current_state.get("stage", "down")
+    last_rep_time = current_state.get("last_rep_time", 0)
+    dynamic_max_angle = current_state.get("dynamic_max_angle", 0)
+    dynamic_min_angle = current_state.get("dynamic_min_angle", 180)
+    frame_count = current_state.get("frame_count", 0)
+    partial_rep_buffer = current_state.get("partial_rep_buffer", 0.0)
     analysis_side = current_state.get("analysis_side", None)
+    calibrated = current_state.get("calibrated", False) # NEW
+
+    # Initialize response variables
+    angle, angle_coords, feedback, accuracy = 0, {}, [], 0.0
 
     try:
-        header, encoded = request.frame.split(',', 1) if ',' in request.frame else ('', request.frame)
+        # --- Frame Decoding ---
+        header, encoded = request.frame.split(',', 1)
         img_data = base64.b64decode(encoded)
         nparr = np.frombuffer(img_data, np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-        if frame is None or frame.size == 0: return {"reps": reps, "feedback": [{"type": "warning", "message": "Video stream data corrupted."}], "accuracy_score": 0.0, "state": current_state, "drawing_landmarks": [], "current_angle": 0, "angle_coords": {}}
+        if frame is None or frame.size == 0:
+            # Handle corrupted frame data
+            return {"reps": reps, "feedback": [{"type": "warning", "message": "Video stream data corrupted."}], "accuracy_score": 0.0, "state": current_state, "drawing_landmarks": [], "current_angle": 0, "angle_coords": {}}
 
+        # --- Pose Detection ---
         image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = pose.process(image_rgb)
-        landmarks = None
         
         if not results.pose_landmarks:
             feedback.append({"type": "warning", "message": "No pose detected. Adjust camera view."})
         else:
             landmarks = results.pose_landmarks.landmark
             exercise_name = request.exercise_name.lower()
-            if analysis_side is None: analysis_side = get_best_side(landmarks)
+
+            if analysis_side is None:
+                analysis_side = get_best_side(landmarks)
             
             if analysis_side is None:
-                feedback.append({"type": "warning", "message": "Please turn sideways or expose one full side."})
+                feedback.append({"type": "warning", "message": "Please turn sideways to the camera."})
             else:
-                config = EXERCISE_CONFIGS.get(exercise_name, {})
-                if not config: feedback.append({"type": "warning", "message": f"Configuration not found for: {exercise_name}"})
+                config = EXERCISE_CONFIGS.get(exercise_name)
+                analysis_func = ANALYSIS_MAP.get(exercise_name)
+
+                if not config or not analysis_func:
+                    feedback.append({"type": "error", "message": f"Exercise '{exercise_name}' not configured."})
                 else:
-                    analysis_func = ANALYSIS_MAP.get(exercise_name)
-                    if analysis_func:
-                        angle, angle_coords, analysis_feedback = analysis_func(landmarks, analysis_side)
-                        feedback.extend(analysis_feedback)
-                        
-                        if not analysis_feedback: 
-                            CALIBRATION_FRAMES, DEBOUNCE_TIME = config['calibration_frames'], config['debounce']
-                            current_time = time.time()
-                            
-                            if frame_count < CALIBRATION_FRAMES and reps == 0:
+                    # --- Core Analysis ---
+                    angle, angle_coords, analysis_feedback = analysis_func(landmarks, analysis_side)
+                    feedback.extend(analysis_feedback)
+                    
+                    if not analysis_feedback: # Proceed only if base analysis (e.g., visibility) passes
+                        CALIBRATION_FRAMES = config['calibration_frames']
+                        DEBOUNCE_TIME = config['debounce']
+                        MINIMUM_ROM_THRESHOLD = config.get('min_rom', 30) # Minimum range of motion in degrees
+
+                        # --- Calibration Logic ---
+                        if not calibrated:
+                            frame_count += 1
+                            if frame_count <= CALIBRATION_FRAMES:
                                 dynamic_max_angle = max(dynamic_max_angle, angle)
                                 dynamic_min_angle = min(dynamic_min_angle, angle)
-                                frame_count += 1
-                                feedback.append({"type": "progress", "message": f"Calibrating range ({frame_count}/{CALIBRATION_FRAMES}). Move fully from start to finish position."})
-                                accuracy = 0.0 
-                                
-                            if frame_count >= CALIBRATION_FRAMES or reps > 0:
-                                CALIBRATED_MIN_ANGLE, CALIBRATED_MAX_ANGLE = dynamic_min_angle, dynamic_max_angle
-                                MIN_ANGLE_THRESHOLD_FULL, MAX_ANGLE_THRESHOLD_FULL = CALIBRATED_MIN_ANGLE + 5, CALIBRATED_MAX_ANGLE - 5 
-                                MIN_ANGLE_THRESHOLD_PARTIAL, MAX_ANGLE_THRESHOLD_PARTIAL = CALIBRATED_MIN_ANGLE + 20, CALIBRATED_MAX_ANGLE - 20 
-                                frame_accuracy = calculate_accuracy(angle, CALIBRATED_MIN_ANGLE, CALIBRATED_MAX_ANGLE)
-                                accuracy = frame_accuracy 
+                                feedback.append({"type": "progress", "message": f"Calibrating ({frame_count}/{CALIBRATION_FRAMES}). Please perform the full movement."})
+                            else:
+                                # FIX: Validate calibration range to prevent counting on no movement
+                                calibrated_rom = dynamic_max_angle - dynamic_min_angle
+                                if calibrated_rom < MINIMUM_ROM_THRESHOLD:
+                                    # Reset if calibration range is too small
+                                    frame_count = 0
+                                    dynamic_max_angle = 0
+                                    dynamic_min_angle = 180
+                                    feedback.append({"type": "warning", "message": f"Calibration failed (Range: {int(calibrated_rom)}°). Please perform a full, clear repetition."})
+                                else:
+                                    # Successful calibration
+                                    calibrated = True
+                                    feedback.append({"type": "success", "message": "Calibration Complete! You can start your reps."})
+                        
+                        # --- Rep Counting Logic (only runs after successful calibration) ---
+                        if calibrated:
+                            CALIBRATED_MIN_ANGLE, CALIBRATED_MAX_ANGLE = dynamic_min_angle, dynamic_max_angle
+                            
+                            # Define thresholds based on calibrated range
+                            MIN_ANGLE_THRESHOLD = CALIBRATED_MIN_ANGLE + 0.15 * (CALIBRATED_MAX_ANGLE - CALIBRATED_MIN_ANGLE)
+                            MAX_ANGLE_THRESHOLD = CALIBRATED_MAX_ANGLE - 0.15 * (CALIBRATED_MAX_ANGLE - CALIBRATED_MIN_ANGLE)
 
-                                if angle < MIN_ANGLE_THRESHOLD_PARTIAL: 
-                                    stage = "up"
-                                    feedback.append({"type": "instruction", "message": "Hold contracted position at the top!" if angle < MIN_ANGLE_THRESHOLD_FULL else "Go deeper for a full rep."})
-                                
-                                if angle > MAX_ANGLE_THRESHOLD_PARTIAL and stage == "up":
-                                    if current_time - last_rep_time > DEBOUNCE_TIME:
-                                        rep_amount = 0.0
-                                        if angle > MAX_ANGLE_THRESHOLD_FULL: rep_amount, success_message = 1.0, "FULL Rep Completed! Well done."
-                                        else: rep_amount, success_message = 0.5, "Partial Rep (50%) counted. Complete the movement."
-                                            
-                                        if rep_amount > 0:
-                                            stage, partial_rep_buffer, last_rep_time = "down", partial_rep_buffer + rep_amount, current_time
-                                            if partial_rep_buffer >= 1.0: reps, partial_rep_buffer = reps + int(partial_rep_buffer), partial_rep_buffer % 1.0 
-                                            feedback.append({"type": "encouragement", "message": f"{success_message} Total reps: {reps}"})
-                                        else: feedback.append({"type": "warning", "message": "Incomplete return to starting position."})
-                                    else: feedback.append({"type": "warning", "message": "Slow down! Ensure controlled return."})
-                                        
-                                if not any(f['type'] in ['warning', 'instruction', 'encouragement'] for f in feedback):
-                                    if stage == 'up' and angle > MIN_ANGLE_THRESHOLD_FULL: feedback.append({"type": "progress", "message": "Push further to the maximum range."})
-                                    elif stage == 'down' and angle < MAX_ANGLE_THRESHOLD_FULL: feedback.append({"type": "progress", "message": "Return fully to the starting position."})
-                                    elif stage == 'down': feedback.append({"type": "progress", "message": "Ready to start the next rep."})
-                                    elif stage == 'up': feedback.append({"type": "progress", "message": "Controlled movement upward."})
-                    else: feedback.append({"type": "warning", "message": "Analysis function missing."})
-        
-        final_accuracy_display = accuracy 
-        drawing_landmarks = get_2d_landmarks(landmarks) if landmarks else []
-        new_state = {"reps": reps, "stage": stage, "angle": round(angle, 1), "last_rep_time": last_rep_time, "dynamic_max_angle": dynamic_max_angle, "dynamic_min_angle": dynamic_min_angle, "frame_count": frame_count, "partial_rep_buffer": partial_rep_buffer, "analysis_side": analysis_side}
+                            accuracy = calculate_accuracy(angle, CALIBRATED_MIN_ANGLE, CALIBRATED_MAX_ANGLE)
+                            
+                            # State transition to "up" (contracted position)
+                            if angle <= MIN_ANGLE_THRESHOLD and stage == 'down':
+                                stage = "up"
 
-        return {"reps": reps, "feedback": feedback if feedback else [{"type": "progress", "message": "Processing..."}], "accuracy_score": round(final_accuracy_display, 2), "state": new_state, "drawing_landmarks": drawing_landmarks, "current_angle": round(angle, 1), "angle_coords": angle_coords, "min_angle": round(dynamic_min_angle, 1), "max_angle": round(dynamic_max_angle, 1), "side": analysis_side}
+                            # State transition to "down" (extended position) + REP COUNT
+                            elif angle >= MAX_ANGLE_THRESHOLD and stage == 'up':
+                                reps += 1
+                                stage = "down"
+                                last_rep_time = time.time()
+                                feedback.append({"type": "success", "message": f"Rep #{reps} counted!"})
+                            
+                            # Provide ongoing feedback based on current stage
+                            if not any(f['type'] == 'success' for f in feedback):
+                                if stage == 'down':
+                                    feedback.append({"type": "progress", "message": "Begin the upward movement."})
+                                elif stage == 'up':
+                                    feedback.append({"type": "progress", "message": "Return to the starting position."})
+
+
+        # --- Prepare Response ---
+        drawing_landmarks = get_2d_landmarks(landmarks) if results.pose_landmarks else []
+        new_state = {
+            "reps": reps, "stage": stage, "last_rep_time": last_rep_time,
+            "dynamic_max_angle": dynamic_max_angle, "dynamic_min_angle": dynamic_min_angle,
+            "frame_count": frame_count, "partial_rep_buffer": partial_rep_buffer,
+            "analysis_side": analysis_side, "calibrated": calibrated # NEW: Persist calibration state
+        }
+
+        return {
+            "reps": reps,
+            "feedback": feedback if feedback else [{"type": "progress", "message": "Analyzing..."}],
+            "accuracy_score": round(accuracy, 2),
+            "state": new_state,
+            "drawing_landmarks": drawing_landmarks,
+            "current_angle": round(angle, 1),
+            "angle_coords": angle_coords,
+            "side": analysis_side
+        }
 
     except Exception as e:
         print(f"CRITICAL ERROR in analyze_frame: {e}")
         traceback.print_exc() 
         raise HTTPException(status_code=500, detail=f"Unexpected server error during analysis: {str(e)}")
-
 
 # =========================================================================
 # 5. API ENDPOINTS (Authentication, Session & Progress)
