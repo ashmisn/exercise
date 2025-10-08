@@ -24,7 +24,7 @@ export const Navigation: React.FC<NavigationProps> = ({ currentPage, onNavigate 
             <div className="bg-blue-600 p-2 rounded-lg">
               <Activity className="w-6 h-6 text-white" />
             </div>
-            <span className="ml-3 text-xl font-bold text-gray-900">AI Physiotherapy</span>
+            <span className="ml-3 text-xl font-bold text-gray-900">Rebound</span>
           </div>
 
           <div className="flex items-center gap-2">
