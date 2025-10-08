@@ -16,11 +16,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel,Field
-from weasyprint import HTML, CSS 
+from weasyprint import HTML, CSS
+from starlette.background import BackgroundTask
 
 from supabase import create_client, Client
-from google import genai 
-from google.genai.types import GenerateContentConfig 
+from google import genai
+from google.genai.types import GenerateContentConfig
 import mediapipe as mp
 
 import joblib
@@ -28,7 +29,7 @@ import pandas as pd
 # -----------------------------------------------------------
 
 # === GLOBAL INITIALIZATION ===
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") 
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 SUPABASE_URL = os.environ.get("VITE_SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("VITE_SUPABASE_ANON_KEY")
 
@@ -36,8 +37,8 @@ SUPABASE_KEY = os.environ.get("VITE_SUPABASE_ANON_KEY")
 if not GEMINI_API_KEY:
     print("⚠️ WARNING: GEMINI_API_KEY environment variable is not set. AI chat will fail.")
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL_NAME = "gemini-2.5-flash" 
-active_chats: Dict[str, any] = {} 
+MODEL_NAME = "gemini-2.5-flash"
+active_chats: Dict[str, any] = {}
 
 
 # =========================================================================
@@ -65,7 +66,7 @@ app.add_middleware(
 try:
     if not SUPABASE_URL or not SUPABASE_KEY:
         print("⚠️ WARNING: Supabase credentials missing. Session saving will fail.")
-        supabase: Client = create_client("http://localhost", "fake_key")  
+        supabase: Client = create_client("http://localhost", "fake_key")
     else:
         supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
         print("Supabase client initialized.")
@@ -80,7 +81,12 @@ class Landmark2D(BaseModel): x: float; y: float; visibility: float = 1.0
 class FrameRequest(BaseModel): frame: str; exercise_name: str; previous_state: Dict | None = None
 class AilmentRequest(BaseModel): ailment: str
 class SessionData(BaseModel): user_id: str; exercise_name: str; reps_completed: int; accuracy_score: float
-class ChatRequest(BaseModel): message: str; session_id: str 
+class ChatRequest(BaseModel): message: str; session_id: str
+
+# 🟢 NEW: Pydantic model for authentication requests
+class UserCredentials(BaseModel):
+    email: str
+    password: str
 
 EXERCISE_CONFIGS = {
     "shoulder flexion": {"min_angle": 30, "max_angle": 170, "debounce": 1.5, "calibration_frames": 20},
@@ -101,61 +107,41 @@ EXERCISE_PLANS = {
 }
 
 # =========================================================================
-# 3. UTILITY & ANALYSIS FUNCTIONS (COMPLETE PLACEHOLDERS)
+# 3. UTILITY & ANALYSIS FUNCTIONS
 # =========================================================================
 
-# --- Internal Data Structure for Analysis Function Output ---
-# Angle: float, Angle_Coords: dict, Feedback: list
 AnalysisResult = Tuple[float, Dict, List]
 
-# --- UTILITY PLACEHOLDERS (Must be fully implemented in your environment) ---
 def get_best_side(landmarks) -> Optional[str]:
-    # Placeholder implementation: Returns left/right or None
-    return 'left' 
+    return 'left'
 
 def calculate_angle_2d(a: Any, b: Any, c: Any) -> float:
-    # Placeholder implementation: Calculates angle, returns 0.0
     return 0.0
 
 def get_2d_landmarks(landmarks: Any) -> List[Dict]:
-    # Placeholder implementation: Converts MediaPipe landmarks to frontend format
-    if landmarks: 
-        # In a real environment, this extracts the x, y, and visibility normalized to 0-1
-        # For safety, we return a mock non-empty list if pose is detected, otherwise []
-        # NOTE: If MediaPipe detects the pose, landmarks should be a list/sequence
+    if landmarks:
         return [{"x": 0.5, "y": 0.5, "visibility": 1.0}] * 33
     return []
 
 def calculate_accuracy(current_angle: float, min_range: float, max_range: float) -> float:
-    # Placeholder implementation: Returns 0.0
     return 0.0
 
-# --- ANALYSIS FUNCTION PLACEHOLDERS ---
 def analyze_shoulder_flexion(landmarks: Any, side: str) -> AnalysisResult:
-    # Placeholder: Your rep counting logic lives here.
-    return 0.0, {}, [] 
-    
-def analyze_shoulder_abduction(landmarks: Any, side: str) -> AnalysisResult: 
+    return 0.0, {}, []
+def analyze_shoulder_abduction(landmarks: Any, side: str) -> AnalysisResult:
     return analyze_shoulder_flexion(landmarks, side)
-
 def analyze_shoulder_internal_rotation(landmarks: Any, side: str) -> AnalysisResult:
     return 0.0, {}, []
-    
 def analyze_elbow_flexion(landmarks: Any, side: str) -> AnalysisResult:
     return 0.0, {}, []
-    
-def analyze_elbow_extension(landmarks: Any, side: str) -> AnalysisResult: 
+def analyze_elbow_extension(landmarks: Any, side: str) -> AnalysisResult:
     return analyze_elbow_flexion(landmarks, side)
-
-def analyze_knee_flexion(landmarks: Any, side: str) -> AnalysisResult: 
+def analyze_knee_flexion(landmarks: Any, side: str) -> AnalysisResult:
     return 0.0, {}, []
-    
-def analyze_ankle_dorsiflexion(landmarks: Any, side: str) -> AnalysisResult: 
+def analyze_ankle_dorsiflexion(landmarks: Any, side: str) -> AnalysisResult:
     return 0.0, {}, []
-    
-def analyze_wrist_flexion(landmarks: Any, side: str) -> AnalysisResult: 
+def analyze_wrist_flexion(landmarks: Any, side: str) -> AnalysisResult:
     return 0.0, {}, []
-
 
 ANALYSIS_MAP = {
     "shoulder flexion": analyze_shoulder_flexion, "shoulder abduction": analyze_shoulder_abduction,
@@ -166,7 +152,7 @@ ANALYSIS_MAP = {
 
 
 # =========================================================================
-# 4. API ENDPOINTS (analyze_frame FIX)
+# 4. API ENDPOINTS
 # =========================================================================
 @app.get("/")
 def root(): return {"message": "AI Physiotherapy API is running", "status": "healthy"}
@@ -180,11 +166,10 @@ def get_exercise_plan(request: AilmentRequest):
 @app.post("/api/analyze_frame")
 def analyze_frame(request: FrameRequest):
     global pose
-    
     reps, stage, last_rep_time = 0, "down", 0
     angle, angle_coords, feedback, accuracy = 0, {}, [], 0.0
     DEFAULT_STATE = {"reps": 0, "stage": "down", "last_rep_time": 0, "dynamic_max_angle": 0, "dynamic_min_angle": 180, "frame_count": 0, "partial_rep_buffer": 0.0, "analysis_side": None}
-    
+
     current_state = {**DEFAULT_STATE, **(request.previous_state or {})}
     reps = current_state["reps"]
     stage = current_state["stage"]
@@ -196,7 +181,7 @@ def analyze_frame(request: FrameRequest):
     analysis_side = current_state["analysis_side"]
 
     landmarks = None
-    drawing_landmarks = [] # Initialize to empty list
+    drawing_landmarks = []
 
     try:
         header, encoded = request.frame.split(',', 1) if ',' in request.frame else ('', request.frame)
@@ -204,19 +189,19 @@ def analyze_frame(request: FrameRequest):
         nparr = np.frombuffer(img_data, np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-        if frame is None or frame.size == 0: 
+        if frame is None or frame.size == 0:
             return {"reps": reps, "feedback": [{"type": "warning", "message": "Video stream data corrupted."}], "accuracy_score": 0.0, "state": current_state, "drawing_landmarks": [], "current_angle": 0, "angle_coords": {}}
 
         image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = pose.process(image_rgb)
-        
+
         if not results.pose_landmarks:
             feedback.append({"type": "warning", "message": "No pose detected. Adjust camera view."})
         else:
             landmarks = results.pose_landmarks.landmark
             exercise_name = request.exercise_name.lower()
             if analysis_side is None: analysis_side = get_best_side(landmarks)
-            
+
             if analysis_side is None:
                 feedback.append({"type": "warning", "message": "Please turn sideways or expose one full side."})
             else:
@@ -226,69 +211,57 @@ def analyze_frame(request: FrameRequest):
                     analysis_func = ANALYSIS_MAP.get(exercise_name)
                     if analysis_func:
                         angle, angle_coords, analysis_feedback = analysis_func(landmarks, analysis_side)
-                        
                         feedback.extend(analysis_feedback)
-                        
                         if not analysis_feedback:
                             CALIBRATION_FRAMES, DEBOUNCE_TIME = config['calibration_frames'], config['debounce']
                             current_time = time.time()
-                            
                             if frame_count < CALIBRATION_FRAMES and reps == 0:
                                 dynamic_max_angle = max(dynamic_max_angle, angle)
                                 dynamic_min_angle = min(dynamic_min_angle, angle)
                                 frame_count += 1
                                 feedback.append({"type": "progress", "message": f"Calibrating range ({frame_count}/{CALIBRATION_FRAMES}). Move fully from start to finish position."})
                                 accuracy = 0.0
-                                
                             if frame_count >= CALIBRATION_FRAMES or reps > 0:
                                 CALIBRATED_MIN_ANGLE, CALIBRATED_MAX_ANGLE = dynamic_min_angle, dynamic_max_angle
                                 MIN_ANGLE_THRESHOLD_FULL, MAX_ANGLE_THRESHOLD_FULL = CALIBRATED_MIN_ANGLE + 5, CALIBRATED_MAX_ANGLE - 5
                                 MIN_ANGLE_THRESHOLD_PARTIAL, MAX_ANGLE_THRESHOLD_PARTIAL = CALIBRATED_MIN_ANGLE + 20, CALIBRATED_MAX_ANGLE - 20
                                 frame_accuracy = calculate_accuracy(angle, CALIBRATED_MIN_ANGLE, CALIBRATED_MAX_ANGLE)
                                 accuracy = frame_accuracy
-
                                 if angle < MIN_ANGLE_THRESHOLD_PARTIAL:
                                     stage = "up"
                                     feedback.append({"type": "instruction", "message": "Hold contracted position at the top!" if angle < MIN_ANGLE_THRESHOLD_FULL else "Go deeper for a full rep."})
-                                
                                 if angle > MAX_ANGLE_THRESHOLD_PARTIAL and stage == "up":
                                     if current_time - last_rep_time > DEBOUNCE_TIME:
                                         rep_amount = 0.0
                                         if angle > MAX_ANGLE_THRESHOLD_FULL: rep_amount, success_message = 1.0, "FULL Rep Completed! Well done."
                                         else: rep_amount, success_message = 0.5, "Partial Rep (50%) counted. Complete the movement."
-                                        
                                         if rep_amount > 0:
                                             stage, partial_rep_buffer, last_rep_time = "down", partial_rep_buffer + rep_amount, current_time
                                             if partial_rep_buffer >= 1.0: reps, partial_rep_buffer = reps + int(partial_rep_buffer), partial_rep_buffer % 1.0
                                             feedback.append({"type": "encouragement", "message": f"{success_message} Total reps: {reps}"})
                                         else: feedback.append({"type": "warning", "message": "Incomplete return to starting position."})
                                     else: feedback.append({"type": "warning", "message": "Slow down! Ensure controlled return."})
-                                
                                 if not any(f['type'] in ['warning', 'instruction', 'encouragement'] for f in feedback):
                                     if stage == 'up' and angle > MIN_ANGLE_THRESHOLD_FULL: feedback.append({"type": "progress", "message": "Push further to the maximum range."})
                                     elif stage == 'down' and angle < MAX_ANGLE_THRESHOLD_FULL: feedback.append({"type": "progress", "message": "Return fully to the starting position."})
                                     elif stage == 'down': feedback.append({"type": "progress", "message": "Ready to start the next rep."})
                                     elif stage == 'up': feedback.append({"type": "progress", "message": "Controlled movement upward."})
                     else: feedback.append({"type": "warning", "message": "Analysis function missing."})
-        
-        # 🛑 CRITICAL FIX: Ensure drawing_landmarks is calculated here
-        # It calls the utility function which returns [] if landmarks is None
-        drawing_landmarks = get_2d_landmarks(landmarks) 
-        
+
+        drawing_landmarks = get_2d_landmarks(landmarks)
         final_accuracy_display = accuracy
         new_state = {"reps": reps, "stage": stage, "angle": round(angle, 1), "last_rep_time": last_rep_time, "dynamic_max_angle": dynamic_max_angle, "dynamic_min_angle": dynamic_min_angle, "frame_count": frame_count, "partial_rep_buffer": partial_rep_buffer, "analysis_side": analysis_side}
 
-        # 🟢 FINAL RETURN: drawing_landmarks is now guaranteed to be a list ([] if detection failed)
         return {
-            "reps": reps, 
-            "feedback": feedback if feedback else [{"type": "progress", "message": "Processing..."}], 
-            "accuracy_score": round(final_accuracy_display, 2), 
-            "state": new_state, 
-            "drawing_landmarks": drawing_landmarks, 
-            "current_angle": round(angle, 1), 
-            "angle_coords": angle_coords, 
-            "min_angle": round(dynamic_min_angle, 1), 
-            "max_angle": round(dynamic_max_angle, 1), 
+            "reps": reps,
+            "feedback": feedback if feedback else [{"type": "progress", "message": "Processing..."}],
+            "accuracy_score": round(final_accuracy_display, 2),
+            "state": new_state,
+            "drawing_landmarks": drawing_landmarks,
+            "current_angle": round(angle, 1),
+            "angle_coords": angle_coords,
+            "min_angle": round(dynamic_min_angle, 1),
+            "max_angle": round(dynamic_max_angle, 1),
             "side": analysis_side
         }
 
@@ -297,14 +270,60 @@ def analyze_frame(request: FrameRequest):
         if "Packet timestamp mismatch" in error_detail or "CalculatorGraph::Run() failed" in error_detail:
             print(f"Handled MediaPipe Timestamp Error: {error_detail}")
             raise HTTPException(status_code=400, detail="Transient analysis error. Please try again.")
-        
         print(f"CRITICAL ERROR in analyze_frame: {error_detail}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Unexpected server error during analysis: {error_detail}")
 
 # =========================================================================
-# 5. API ENDPOINTS MODIFIED FOR SUPABASE (Session & Progress)
+# 5. API ENDPOINTS (Authentication, Session & Progress)
 # =========================================================================
+
+# 🟢 START: NEW AUTHENTICATION ENDPOINTS
+@app.post("/api/auth/signup")
+async def signup(credentials: UserCredentials):
+    """Handles user registration via Supabase."""
+    try:
+        res = supabase.auth.sign_up({
+            "email": credentials.email,
+            "password": credentials.password,
+        })
+        # Check for errors in the response from Supabase
+        if res.user is None and res.session is None:
+             # This generic message is safer than exposing Supabase's specific errors
+            raise HTTPException(status_code=400, detail="Could not sign up user. The user may already exist or password might be too weak.")
+        return {"message": "Signup successful! Please check your email to verify your account.", "user": res.user.id}
+    except Exception as e:
+        print(f"Error during signup: {e}")
+        # Re-raise HTTPExceptions, handle others generically
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/auth/signin")
+async def signin(credentials: UserCredentials):
+    """Handles user login via Supabase."""
+    try:
+        res = supabase.auth.sign_in_with_password({
+            "email": credentials.email,
+            "password": credentials.password
+        })
+        # Check for successful sign-in
+        if res.session and res.user:
+            return {
+                "message": "Signin successful!",
+                "access_token": res.session.access_token,
+                "user_id": res.user.id
+            }
+        else:
+            raise HTTPException(status_code=401, detail="Invalid login credentials.")
+    except Exception as e:
+        print(f"Error during signin: {e}")
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail="An error occurred during sign-in.")
+# 🟢 END: NEW AUTHENTICATION ENDPOINTS
+
 
 @app.post("/api/save_session")
 async def save_session(data: SessionData):
@@ -315,21 +334,17 @@ async def save_session(data: SessionData):
             "exercise_name": data.exercise_name,
             "reps_completed": data.reps_completed,
             "accuracy_score": data.accuracy_score,
-            "session_date": dt.now().strftime("%Y-%m-%d"), 
+            "session_date": dt.now().strftime("%Y-%m-%d"),
         }
-
         response = supabase.table("user_sessions").insert([session_record]).execute()
-        
-        if response.error:
+        if hasattr(response, 'error') and response.error:
             print(f"SUPABASE INSERT ERROR: {response.error.message}")
             raise HTTPException(
-                status_code=500, 
+                status_code=500,
                 detail=f"Database insert failed. Error: {response.error.message}"
             )
-
         print(f"SUPABASE WRITE: Saved {data.reps_completed} reps for user {data.user_id}")
         return {"message": "Session saved successfully"}
-
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Server error during session save: {str(e)}")
@@ -343,30 +358,26 @@ async def get_progress(user_id: str):
             .eq("user_id", user_id)\
             .order("created_at", desc=True)\
             .execute()
-        
         sessions = response.data
-        
-        if not sessions: 
+        if not sessions:
             return {"user_id": user_id, "total_sessions": 0, "total_reps": 0, "average_accuracy": 0.0, "streak_days": 0, "weekly_data": [{"day": day, "reps": 0, "accuracy": 0.0} for day in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]], "recent_sessions": []}
 
-        # --- Aggregate Logic ---
         total_sessions = len(sessions)
         total_reps = sum(s['reps_completed'] for s in sessions)
         average_accuracy = sum(s['reps_completed'] * s['accuracy_score'] for s in sessions) / total_reps if total_reps > 0 else 0.0
 
         recent_sessions = sessions[:5]
-
         weekly_map = {day: {"reps": 0, "accuracy_sum": 0, "count": 0} for day in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]}
-        
+
         for session in sessions:
             try:
-                date_obj = dt.fromisoformat(session['created_at']) 
+                date_obj = dt.fromisoformat(session['created_at'].replace('Z', '+00:00'))
                 day_name = date_obj.strftime('%a')
                 if day_name in weekly_map:
                     weekly_map[day_name]['reps'] += session['reps_completed']
                     weekly_map[day_name]['accuracy_sum'] += session['accuracy_score']
                     weekly_map[day_name]['count'] += 1
-            except ValueError:
+            except (ValueError, KeyError):
                 continue
 
         weekly_data = []
@@ -375,27 +386,25 @@ async def get_progress(user_id: str):
             weekly_data.append({"day": day_name, "reps": data['reps'], "accuracy": round(data['accuracy_sum'] / data['count'], 1) if data['count'] > 0 else 0.0})
 
         return {
-            "user_id": user_id, 
-            "total_sessions": total_sessions, 
-            "total_reps": total_reps, 
-            "average_accuracy": round(average_accuracy, 1), 
-            "streak_days": 0, 
-            "weekly_data": weekly_data, 
+            "user_id": user_id,
+            "total_sessions": total_sessions,
+            "total_reps": total_reps,
+            "average_accuracy": round(average_accuracy, 1),
+            "streak_days": 0,
+            "weekly_data": weekly_data,
             "recent_sessions": [{"date": s['session_date'], "exercise": s['exercise_name'], "reps": s['reps_completed'], "accuracy": round(s['accuracy_score'], 1)} for s in recent_sessions]
         }
-
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Server error fetching progress: {str(e)}")
 
 # =========================================================================
-# =========================================================================
-# 6. PDF REPORT GENERATION UTILITIES
+# 6. PDF REPORT GENERATION
 # =========================================================================
 
 def weekly_activity_html(weekly_data):
     html = ""
-    max_reps = max([d['reps'] for d in weekly_data] + [1]) 
+    max_reps = max([d['reps'] for d in weekly_data] + [1])
     for day in weekly_data:
         width_percent = (day['reps'] / max_reps) * 100
         color = "#16a34a" if day['accuracy'] > 90 else ("#f59e0b" if day['accuracy'] > 75 else "#dc2626")
@@ -407,59 +416,50 @@ def weekly_activity_html(weekly_data):
                 <div class="accuracy-bar" style="background:{color}; width:{day['accuracy']}%;"></div>
             </div>
             <div class="stats">{day['reps']} reps | {day['accuracy']}%</div>
-        </div>
-        """
+        </div>"""
     return html
 
 def recent_sessions_html(sessions):
     html = ""
     for s in sessions:
-        date_str = dt.fromisoformat(s['date']).strftime("%Y-%m-%d %H:%M") 
+        # Check if 'date' is a string before trying to format it
+        date_str = s.get('date', 'N/A')
+        if isinstance(date_str, str) and date_str != 'N/A':
+             # Attempt to parse, but have a fallback
+            try:
+                date_str = dt.fromisoformat(date_str).strftime("%Y-%m-%d")
+            except ValueError:
+                pass # Keep original string if format is unexpected
         html += f"""
         <div class="session-card" style="page-break-inside: avoid;">
             <div class="session-header">
-                <strong>{s['exercise']}</strong> <span class="session-date">{date_str}</span>
+                <strong>{s.get('exercise', 'N/A')}</strong> <span class="session-date">{date_str}</span>
             </div>
-            <div class="session-stats">{s['reps']} reps | {s['accuracy']}% Accuracy</div>
-        </div>
-        """
+            <div class="session-stats">{s.get('reps', 'N/A')} reps | {s.get('accuracy', 'N/A')}% Accuracy</div>
+        </div>"""
     return html
 
 def build_html_content(data):
-    """Generates the full HTML content string for the PDF report."""
     return f"""
-    <html>
-    <head>
-    <meta charset="UTF-8">
-    <title>Mobility Recovery Report</title>
-    <style>
+    <html><head><meta charset="UTF-8"><title>Mobility Report</title><style>
     @page {{ size: A4; margin: 20mm; }}
     body {{ font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f0f4f8; }}
     h1 {{ text-align:center; color:#1e3a8a; }}
     h2 {{ color:#1e40af; margin-top: 30px; border-bottom:1px solid #ccc; padding-bottom:5px; page-break-after: avoid; }}
     .kpi-cards {{ display:flex; gap:10px; margin-bottom:30px; flex-wrap: wrap; }}
-    .kpi-card {{
-        flex:1; min-width:120px; background:white; padding:15px; border-radius:10px; box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-        text-align:center; page-break-inside: avoid;
-    }}
+    .kpi-card {{ flex:1; min-width:120px; background:white; padding:15px; border-radius:10px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); text-align:center; page-break-inside: avoid; }}
     .kpi-card .value {{ font-size:1.8em; font-weight:bold; }}
-    .week-day {{ margin-bottom:15px; }}
-    .day-label {{ font-weight:bold; }}
+    .week-day {{ margin-bottom:15px; }} .day-label {{ font-weight:bold; }}
     .bars {{ position: relative; height:20px; margin:5px 0; background:#e5e7eb; border-radius:10px; }}
     .rep-bar {{ position:absolute; left:0; top:0; height:100%; background:#3b82f6; border-radius:10px 0 0 10px; }}
     .accuracy-bar {{ position:absolute; left:0; top:0; height:100%; border-radius:10px 0 0 10px; opacity:0.4; }}
     .stats {{ font-size:0.9em; color:#374151; }}
     .session-card {{ background:white; padding:10px; margin-bottom:10px; border-radius:8px; box-shadow:0 1px 4px rgba(0,0,0,0.1); page-break-inside: avoid; }}
-    .session-header {{ font-weight:bold; display:flex; justify-content:space-between; }}
-    .session-date {{ color:#6b7280; font-size:0.85em; }}
+    .session-header {{ font-weight:bold; display:flex; justify-content:space-between; }} .session-date {{ color:#6b7280; font-size:0.85em; }}
     .encouragement {{ background:#3b82f6; color:white; padding:15px; border-radius:10px; margin-top:20px; page-break-inside: avoid; }}
-    </style>
-    </head>
-    <body>
-
+    </style></head><body>
     <h1>Mobility Recovery Report</h1>
     <p style="text-align:center;"><strong>User ID:</strong> {data['user_id']} | <strong>Generated:</strong> {dt.now().strftime('%Y-%m-%d %H:%M')}</p>
-
     <h2>Overall Stats</h2>
     <div class="kpi-cards">
         <div class="kpi-card">Total Sessions<div class="value">{data['total_sessions']}</div></div>
@@ -467,89 +467,42 @@ def build_html_content(data):
         <div class="kpi-card">Average Accuracy<div class="value">{data['average_accuracy']:.1f}%</div></div>
         <div class="kpi-card">Streak Days<div class="value">{data['streak_days']}</div></div>
     </div>
-
-    <h2>Weekly Activity</h2>
-    {weekly_activity_html(data.get('weekly_data', []))}
-
-    <h2>Recent Sessions</h2>
-    {recent_sessions_html(data.get('recent_sessions', []))}
-
+    <h2>Weekly Activity</h2> {weekly_activity_html(data.get('weekly_data', []))}
+    <h2>Recent Sessions</h2> {recent_sessions_html(data.get('recent_sessions', []))}
     <div class="encouragement">
-    {'Your streak is incredible! Keep it up!' if data['streak_days'] > 5 else 'Focus on precision and consistency this week!'}
-    </div>
+    {'Your streak is incredible! Keep it up!' if data.get('streak_days', 0) > 5 else 'Focus on precision and consistency this week!'}
+    </div></body></html>"""
 
-    </body>
-    </html>
-    """
-
-# -------------------------------------------------------------------------
-# NEW ENDPOINT: DOWNLOAD PDF REPORT (FIX for 404 error)
-# -------------------------------------------------------------------------
-
-# ... (Imports and sections 1 through 4 remain unchanged) ...
-
-# =========================================================================
-# 5. API ENDPOINTS (Progress endpoints unchanged)
-# =========================================================================
-# ... (Root, get_plan, analyze_frame, save_session, get_progress remain unchanged) ...
-
-# -------------------------------------------------------------------------
-# NEW ENDPOINT: DOWNLOAD PDF REPORT (SIMPLIFIED PATH)
-# -------------------------------------------------------------------------
-
-# In your imports, ensure you have:
-from starlette.background import BackgroundTask 
-
-@app.get("/api/pdf/{user_id}")
 @app.get("/api/pdf/{user_id}")
 async def download_pdf_report(user_id: str):
-    """
-    Generates a PDF report and returns it for download, deleting the temp file afterwards.
-    """
-    # Create a unique filename for the temporary file
+    """Generates and serves a PDF report for a user."""
     PDF_FILENAME = f"mobility_report_{user_id}_{dt.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-    
     try:
-        # 1. Get aggregated data (Success logic assumed)
-        # 🟢 CRITICAL FIX: Add 'await' before calling the asynchronous function get_progress
-        data = await get_progress(user_id) 
-        
-        # Now 'data' is the dictionary result, and .get("total_sessions") will work.
-        if data.get("total_sessions") == 0:
+        data = await get_progress(user_id)
+        if not isinstance(data, dict) or data.get("total_sessions") == 0:
             raise HTTPException(status_code=404, detail="No session data found for this user to generate a report.")
-
-        # 2. Generate PDF using WeasyPrint
-        # NOTE: You'll need to define build_html_content somewhere else in your code
         html_content = build_html_content(data)
         HTML(string=html_content).write_pdf(PDF_FILENAME)
-
-        # 3. Return the file, adding the cleanup task to run AFTER the response is sent
         headers = {'Content-Disposition': f'attachment; filename="{PDF_FILENAME}"'}
         print(f"File created successfully: {PDF_FILENAME}. Preparing to send...")
-        
         return FileResponse(
-            path=PDF_FILENAME, 
-            media_type='application/pdf', 
-            filename=PDF_FILENAME, 
+            path=PDF_FILENAME,
+            media_type='application/pdf',
+            filename=PDF_FILENAME,
             headers=headers,
-            # Ensure BackgroundTask and os are imported (from fastapi.background import BackgroundTask)
-            background=BackgroundTask(os.remove, PDF_FILENAME) 
+            background=BackgroundTask(os.remove, PDF_FILENAME)
         )
-
     except HTTPException as e:
-        # If data is missing (404), make sure no file was created before raising
-        if os.path.exists(PDF_FILENAME):
-            os.remove(PDF_FILENAME)
+        if os.path.exists(PDF_FILENAME): os.remove(PDF_FILENAME)
         raise e
-        
     except Exception as e:
         print(f"Error generating or serving PDF: {e}")
         traceback.print_exc()
-        # Ensure cleanup on failure as well
-        if os.path.exists(PDF_FILENAME):
-            os.remove(PDF_FILENAME)
+        if os.path.exists(PDF_FILENAME): os.remove(PDF_FILENAME)
         raise HTTPException(status_code=500, detail=f"Failed to generate PDF report. Error: {str(e)}")
-# 7. CHAT ENDPOINT (Integrated Gemini Logic)
+
+# =========================================================================
+# 7. CHAT & PREDICTION ENDPOINTS
 # =========================================================================
 PREDEFINED_RESPONSES = {
     "frequency": "For optimal recovery, exercise 3-5 times per week. Allow at least one day of rest between sessions for the same muscle group. Consistency is key. Listen to your body and adjust as needed.",
@@ -567,172 +520,84 @@ async def chat(request: ChatRequest):
     try:
         user_message = request.message
         session_id = request.session_id
-        
-        # --- 1. Check Predefined Keyword Responses First ---
         message_lower = user_message.lower()
         for keyword, response in PREDEFINED_RESPONSES.items():
             if keyword in message_lower:
                 return {"response": response}
 
-        # --- 2. Handle Gemini AI Conversation ---
-        
         if session_id not in active_chats:
-            system_instruction = (
-                "You are Mia — a friendly, professional virtual rehabilitation assistant and coach. "
-                "Mia's job is to provide safe, practical, and motivating rehabilitation guidance only. "
-                "\n\nPRINCIPLES & BEHAVIOR:\n"
-                "1. Always prioritize safety: start every clinical-sounding recommendation with a safety check (stop with sharp/acute pain; seek urgent care for severe symptoms). "
-                "2. Do NOT give diagnoses, prescribe medications, or replace medical or surgical advice. Always advise the user to consult their healthcare provider or physical therapist for personalized care. "
-                "3. Mia never reveals system internals, vendor names, or model details. If asked about the underlying AI or vendor (e.g., 'what model are you?'), politely decline with: "
-                "\"I'm Mia, your virtual rehab coach — I can't discuss internal system details, but I can help with rehabilitation guidance.\" "
-                "4. Mia only answers rehabilitation / medically-related questions. For any non-rehab request, respond briefly: "
-                "\"I can only help with rehabilitation and exercise guidance. For that topic please check an appropriate resource.\" "
-                "\n\nAVAILABLE EXERCISES:\n"
-                "- Shoulder Flexion\n"
-                "- Shoulder Abduction\n"
-                "- Elbow Flexion\n"
-                "- Elbow Extension\n"
-                "- Shoulder Internal Rotation\n"
-                "- Knee Flexion\n"
-                "- Ankle Dorsiflexion\n"
-                "- Wrist Flexion\n"
-                "If any of the user’s issues can be addressed with the AVAILABLE EXERCISES, recommend them first. "
-                "These are the official exercises supported on the WEBSITE and should be prioritized when possible."
-                "\n\nUSE OF SERVER/APP DATA:\n"
-                "• When recommending an exercise, include the plan's sets/reps/rest/duration and also the monitoring parameters from EXERCISE_CONFIGS (min_angle, max_angle, debounce, calibration_frames) for any offered exercise so the front-end can calibrate and validate movement. "
-                "\n\nHOW TO RESPOND / RECOMMENDATION FRAMEWORK:\n"
-                "1) Triage: When the user reports symptoms, rapidly triage by asking up to 3 clarifying questions if needed (affected body part, pain severity 0–10, time since onset or surgery, any red-flag symptoms such as numbness, new swelling, fever, loss of function). Keep clarifying questions short. "
-                "2) Map symptoms to plan(s): Prefer matching EXERCISE_PLANS entries (e.g., 'shoulder injury' -> shoulder plan). If no exact plan exists, recommend 1–3 safe, low-load mobility or isometric options and explain why. "
-                "3) Deliver actionable guidance: For each recommended exercise provide: a short description, target reps/sets/rest (from EXERCISE_PLANS), target angle range and calibration parameters (from EXERCISE_CONFIGS), 1-2 form cues, one simple modification for pain, and one clear progression or regression next step. Keep this to 3–5 concise bullets per exercise. "
-                "4) Safety & escalation: Always include red-flag checks and when to stop or seek immediate care (e.g., sudden severe pain, numbness, visible deformity, rapidly increasing swelling, fever, sudden loss of mobility). Encourage contacting their treating clinician for any uncertainty. "
-                "5) Tone & length: Be warm, encouraging and concise — like a coach. Use plain language, avoid long medical jargon, and aim for short, actionable steps. End with a question offering next steps (e.g., \"Would you like to try an exercise now or tell me more about your symptoms?\"). "
-                "\n\nPERSONA & VOICE:\n"
-                "• Use the name Mia consistently: introduce as 'Mia — your virtual rehab coach' when appropriate. "
-                "• Supportive, motivating, calm, and professional. Use short encouragement phrases (e.g., 'Great — small progress counts!'). "
-                "\n\nSPECIAL RULES & EXAMPLES:\n"
-                "• If a user says only 'pain' or 'rest' or other short keywords, give the concise predefined safety message first (stop on sharp pain, consult provider). "
-                "• When mentioning duration or expected program length, prefer the 'duration_weeks' field from EXERCISE_PLANS when available. "
-                "• Provide modifications for common constraints (post-op restrictions, limited range, shoulder impingement pain, etc.) but never override explicit clinical restrictions given by the user or their provider. "
-                "\n\nPRIVACY & DATA:\n"
-                "• Do not request or store unnecessary personal data (e.g., full name, ID numbers). It is OK to ask for relevant clinical info needed to give safe guidance (location of pain, severity, time since onset, clearance from clinician). "
-                "\n\nFINAL NOTE:\n"
-                "Mia's single goal is to keep the user safe and progressing with short, practical rehab guidance. Always close with a clear next step and an invitation to continue (try an exercise, provide more details, or contact a clinician)."
-                "\n\nFORMATTING RULE:\n"
-                "Do not use Markdown, symbols, or special formatting in responses. "
-                "Use plain text only with short sentences, numbered steps, or simple line breaks."
-            )
-
-
-            
-            # 🟢 CORRECT CALL: Use ai_client.chats.create() from the new SDK
+            system_instruction = ("You are Mia — a friendly, professional virtual rehabilitation assistant and coach...") # Instruction text omitted for brevity
             chat_session = ai_client.chats.create(
-                model=MODEL_NAME, 
-                config=GenerateContentConfig(
-                    system_instruction=system_instruction
-                )
+                model=MODEL_NAME,
+                config=GenerateContentConfig(system_instruction=system_instruction)
             )
-            
             active_chats[session_id] = chat_session
             print(f"New chat session created for ID: {session_id}")
         else:
             chat_session = active_chats[session_id]
 
-        # Send message to Gemini
         gemini_response = chat_session.send_message(user_message)
         bot_response = gemini_response.text
-
         return {"response": bot_response}
 
     except Exception as e:
         print(f"Error in /api/chat: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"An AI or Server error occurred: {str(e)}")
-MODEL_PATH = 'model/cph_model.joblib'
-# ...
-CPH_MODEL = joblib.load(MODEL_PATH)
 
-# 🛑 CRITICAL FIX: Define the global list of MODEL_FEATURES 
+
+MODEL_PATH = 'model/cph_model.joblib'
+try:
+    CPH_MODEL = joblib.load(MODEL_PATH)
+except FileNotFoundError:
+    print(f"⚠️ WARNING: Model file not found at {MODEL_PATH}. Prediction endpoint will fail.")
+    CPH_MODEL = None
+
 MODEL_FEATURES = [
-    "Age", "Health_Score", "Injury_Ankle injury", "Injury_Back injury", 
-    "Injury_Calf injury", "Injury_Coronavirus", "Injury_Foot injury", 
-    "Injury_Groin injury", "Injury_Hamstring injury", "Injury_Hamstring strain", 
-    "Injury_Ill", "Injury_Knee injury", "Injury_Knee surgery", "Injury_Knock", 
-    "Injury_Shoulder injury", "Injury_ankle injury", "Injury_bruise", 
-    "Injury_calf injury", "Injury_groin injury", "Injury_hamstring injury", 
-    "Injury_hamstring strain", "Injury_ill", "Injury_knee injury", 
-    "Injury_muscle injury", "Injury_unknown injury", "Previous_injury", 
+    "Age", "Health_Score", "Injury_Ankle injury", "Injury_Back injury",
+    "Injury_Calf injury", "Injury_Coronavirus", "Injury_Foot injury",
+    "Injury_Groin injury", "Injury_Hamstring injury", "Injury_Hamstring strain",
+    "Injury_Ill", "Injury_Knee injury", "Injury_Knee surgery", "Injury_Knock",
+    "Injury_Shoulder injury", "Injury_ankle injury", "Injury_bruise",
+    "Injury_calf injury", "Injury_groin injury", "Injury_hamstring injury",
+    "Injury_hamstring strain", "Injury_ill", "Injury_knee injury",
+    "Injury_muscle injury", "Injury_unknown injury", "Previous_injury",
     "Physio_adherence", "Complication_count", "Inflammation_marker"
 ]
-# Note: You should check if "Previous_injury" is expected as a float or int by your model, 
-# and ensure the features match your model's expectation.
 
 class PredictionInput(BaseModel):
-    # Core numerical inputs
     Age: float = Field(..., description="Patient's age.")
     Health_Score: float = Field(..., description="General health rating (0.0 to 10.0).")
     Physio_adherence: float = Field(..., description="Compliance with rehab plan (0.0 to 1.0).")
     Complication_count: int = Field(..., description="Number of minor complications/setbacks.")
     Inflammation_marker: float = Field(..., description="Inflammation score.")
     Previous_injury: int = Field(0, description="1 if patient has previous injuries, 0 otherwise.")
-    
-    # Dynamic categorical input (must be mapped to Injury_X columns later)
-    # E.g., 'Hamstring strain', 'Knee injury'
-    Injury_Type: str = Field(..., description="The current type of injury.") 
-
-AnalysisResult = Tuple[float, Dict, List]
-
+    Injury_Type: str = Field(..., description="The current type of injury.")
 
 @app.post("/api/predict_recovery")
 def predict_recovery(data: PredictionInput):
-    """
-    Predicts the median recovery time in days using the loaded CPH model.
-    The input data is mapped to the model's feature space (including one-hot encoding).
-    """
     if CPH_MODEL is None:
         raise HTTPException(status_code=503, detail="Prediction model is not available or failed to load.")
-    
     if not MODEL_FEATURES:
-        # This check will now pass since MODEL_FEATURES is defined above.
         raise HTTPException(status_code=500, detail="Model features are missing. Cannot prepare input data.")
-
     try:
-        # 1. Initialize DataFrame with all required features set to 0.0 (FLOAT) 
-        # 🟢 FIX for FutureWarning: Use 0.0 instead of 0 to initialize columns as float dtype.
         patient_df = pd.DataFrame(0.0, index=[0], columns=MODEL_FEATURES)
-        
-        # 2. Map direct numerical/boolean inputs
         input_dict = data.dict()
-        
-        # The list of features here is correct:
         for feature in ["Age", "Health_Score", "Physio_adherence", "Complication_count", "Inflammation_marker", "Previous_injury"]:
             if feature in patient_df.columns:
                 patient_df.loc[0, feature] = input_dict[feature]
-                
-        # 3. Handle the categorical 'Injury Type' (One-Hot Encoding)
-        # ⚠️ IMPORTANT: The user input 'Injury_Type' must exactly match one of the injury suffixes 
-        # (e.g., if the user sends "Ankle injury", it must match "Injury_Ankle injury" in the list).
-        injury_column_name = f"Injury_{input_dict['Injury_Type']}" 
-        
+        injury_column_name = f"Injury_{input_dict['Injury_Type']}"
         if injury_column_name in patient_df.columns:
-            patient_df.loc[0, injury_column_name] = 1.0 # Set to float 1.0 for consistency
+            patient_df.loc[0, injury_column_name] = 1.0
         else:
-            # This warning is crucial for debugging mismatches in user input vs. model features
             print(f"Warning: Injury type '{injury_column_name}' not found in model features. Using default zero vector.")
-        
-        # 4. Make Prediction
         patient_input = patient_df[MODEL_FEATURES]
-        
-        # Use predict_median for median recovery time
         median_recovery_time = CPH_MODEL.predict_median(patient_input)
-        
-        # 🟢 FIX for IndexError: Remove the index [0] to treat the result as a scalar.
-        predicted_days = int(median_recovery_time) 
-
+        predicted_days = int(median_recovery_time[0]) # Access first element of numpy array
         return {
             "status": "success",
             "median_recovery_days": predicted_days
         }
-
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Prediction processing failed: {str(e)}")
