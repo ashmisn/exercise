@@ -141,8 +141,114 @@ def get_exercise_plan(request: AilmentRequest):
 
 @app.post("/api/analyze_frame")
 def analyze_frame(request: FrameRequest):
-    # This is a placeholder; your full implementation should be here.
-    return { "reps": 0, "feedback": [], "accuracy_score": 0.0, "state": {}, "drawing_landmarks": [], "current_angle": 0, "angle_coords": {}, }
+    global pose
+    reps, stage, last_rep_time = 0, "down", 0
+    angle, angle_coords, feedback, accuracy = 0, {}, [], 0.0
+    DEFAULT_STATE = {"reps": 0, "stage": "down", "last_rep_time": 0, "dynamic_max_angle": 0, "dynamic_min_angle": 180, "frame_count": 0, "partial_rep_buffer": 0.0, "analysis_side": None}
+
+    current_state = {**DEFAULT_STATE, **(request.previous_state or {})}
+    reps = current_state["reps"]
+    stage = current_state["stage"]
+    last_rep_time = current_state["last_rep_time"]
+    dynamic_max_angle = current_state["dynamic_max_angle"]
+    dynamic_min_angle = current_state["dynamic_min_angle"]
+    frame_count = current_state["frame_count"]
+    partial_rep_buffer = current_state["partial_rep_buffer"]
+    analysis_side = current_state["analysis_side"]
+
+    landmarks = None
+    drawing_landmarks = []
+
+    try:
+        header, encoded = request.frame.split(',', 1) if ',' in request.frame else ('', request.frame)
+        img_data = base64.b64decode(encoded)
+        nparr = np.frombuffer(img_data, np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        if frame is None or frame.size == 0:
+            return {"reps": reps, "feedback": [{"type": "warning", "message": "Video stream data corrupted."}], "accuracy_score": 0.0, "state": current_state, "drawing_landmarks": [], "current_angle": 0, "angle_coords": {}}
+
+        image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = pose.process(image_rgb)
+
+        if not results.pose_landmarks:
+            feedback.append({"type": "warning", "message": "No pose detected. Adjust camera view."})
+        else:
+            landmarks = results.pose_landmarks.landmark
+            exercise_name = request.exercise_name.lower()
+            if analysis_side is None: analysis_side = get_best_side(landmarks)
+
+            if analysis_side is None:
+                feedback.append({"type": "warning", "message": "Please turn sideways or expose one full side."})
+            else:
+                config = EXERCISE_CONFIGS.get(exercise_name, {})
+                if not config: feedback.append({"type": "warning", "message": f"Configuration not found for: {exercise_name}"})
+                else:
+                    analysis_func = ANALYSIS_MAP.get(exercise_name)
+                    if analysis_func:
+                        angle, angle_coords, analysis_feedback = analysis_func(landmarks, analysis_side)
+                        feedback.extend(analysis_feedback)
+                        if not analysis_feedback:
+                            CALIBRATION_FRAMES, DEBOUNCE_TIME = config['calibration_frames'], config['debounce']
+                            current_time = time.time()
+                            if frame_count < CALIBRATION_FRAMES and reps == 0:
+                                dynamic_max_angle = max(dynamic_max_angle, angle)
+                                dynamic_min_angle = min(dynamic_min_angle, angle)
+                                frame_count += 1
+                                feedback.append({"type": "progress", "message": f"Calibrating range ({frame_count}/{CALIBRATION_FRAMES}). Move fully from start to finish position."})
+                                accuracy = 0.0
+                            if frame_count >= CALIBRATION_FRAMES or reps > 0:
+                                CALIBRATED_MIN_ANGLE, CALIBRATED_MAX_ANGLE = dynamic_min_angle, dynamic_max_angle
+                                MIN_ANGLE_THRESHOLD_FULL, MAX_ANGLE_THRESHOLD_FULL = CALIBRATED_MIN_ANGLE + 5, CALIBRATED_MAX_ANGLE - 5
+                                MIN_ANGLE_THRESHOLD_PARTIAL, MAX_ANGLE_THRESHOLD_PARTIAL = CALIBRATED_MIN_ANGLE + 20, CALIBRATED_MAX_ANGLE - 20
+                                frame_accuracy = calculate_accuracy(angle, CALIBRATED_MIN_ANGLE, CALIBRATED_MAX_ANGLE)
+                                accuracy = frame_accuracy
+                                if angle < MIN_ANGLE_THRESHOLD_PARTIAL:
+                                    stage = "up"
+                                    feedback.append({"type": "instruction", "message": "Hold contracted position at the top!" if angle < MIN_ANGLE_THRESHOLD_FULL else "Go deeper for a full rep."})
+                                if angle > MAX_ANGLE_THRESHOLD_PARTIAL and stage == "up":
+                                    if current_time - last_rep_time > DEBOUNCE_TIME:
+                                        rep_amount = 0.0
+                                        if angle > MAX_ANGLE_THRESHOLD_FULL: rep_amount, success_message = 1.0, "FULL Rep Completed! Well done."
+                                        else: rep_amount, success_message = 0.5, "Partial Rep (50%) counted. Complete the movement."
+                                        if rep_amount > 0:
+                                            stage, partial_rep_buffer, last_rep_time = "down", partial_rep_buffer + rep_amount, current_time
+                                            if partial_rep_buffer >= 1.0: reps, partial_rep_buffer = reps + int(partial_rep_buffer), partial_rep_buffer % 1.0
+                                            feedback.append({"type": "encouragement", "message": f"{success_message} Total reps: {reps}"})
+                                        else: feedback.append({"type": "warning", "message": "Incomplete return to starting position."})
+                                    else: feedback.append({"type": "warning", "message": "Slow down! Ensure controlled return."})
+                                if not any(f['type'] in ['warning', 'instruction', 'encouragement'] for f in feedback):
+                                    if stage == 'up' and angle > MIN_ANGLE_THRESHOLD_FULL: feedback.append({"type": "progress", "message": "Push further to the maximum range."})
+                                    elif stage == 'down' and angle < MAX_ANGLE_THRESHOLD_FULL: feedback.append({"type": "progress", "message": "Return fully to the starting position."})
+                                    elif stage == 'down': feedback.append({"type": "progress", "message": "Ready to start the next rep."})
+                                    elif stage == 'up': feedback.append({"type": "progress", "message": "Controlled movement upward."})
+                    else: feedback.append({"type": "warning", "message": "Analysis function missing."})
+
+        drawing_landmarks = get_2d_landmarks(landmarks)
+        final_accuracy_display = accuracy
+        new_state = {"reps": reps, "stage": stage, "angle": round(angle, 1), "last_rep_time": last_rep_time, "dynamic_max_angle": dynamic_max_angle, "dynamic_min_angle": dynamic_min_angle, "frame_count": frame_count, "partial_rep_buffer": partial_rep_buffer, "analysis_side": analysis_side}
+
+        return {
+            "reps": reps,
+            "feedback": feedback if feedback else [{"type": "progress", "message": "Processing..."}],
+            "accuracy_score": round(final_accuracy_display, 2),
+            "state": new_state,
+            "drawing_landmarks": drawing_landmarks,
+            "current_angle": round(angle, 1),
+            "angle_coords": angle_coords,
+            "min_angle": round(dynamic_min_angle, 1),
+            "max_angle": round(dynamic_max_angle, 1),
+            "side": analysis_side
+        }
+
+    except Exception as e:
+        error_detail = str(e)
+        if "Packet timestamp mismatch" in error_detail or "CalculatorGraph::Run() failed" in error_detail:
+            print(f"Handled MediaPipe Timestamp Error: {error_detail}")
+            raise HTTPException(status_code=400, detail="Transient analysis error. Please try again.")
+        print(f"CRITICAL ERROR in analyze_frame: {error_detail}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Unexpected server error during analysis: {error_detail}")
 
 # =========================================================================
 # 5. API ENDPOINTS (Authentication, Session & Progress)
@@ -509,12 +615,47 @@ async def download_pdf_report(user_id: str):
 # =========================================================================
 # 7. CHAT & PREDICTION ENDPOINTS
 # =========================================================================
-PREDEFINED_RESPONSES = { "frequency": "For optimal recovery, exercise 3-5 times per week...", "rest": "Rest days are crucial for recovery!...", }
+PREDEFINED_RESPONSES = {
+    "frequency": "For optimal recovery, exercise 3-5 times per week. Allow at least one day of rest between sessions for the same muscle group. Consistency is key. Listen to your body and adjust as needed.",
+    "rest": "Rest days are crucial for recovery! Your muscles need time to repair and strengthen. Never skip rest days. During rest, your body builds back stronger. Consider gentle stretching on rest days.",
+    "correct": "To ensure correct form: 1) Move slowly and deliberately 2) Maintain proper posture 3) Breathe naturally - don't hold your breath 4) Stay within pain-free range 5) Use a mirror to check alignment 6) Focus on quality over quantity.",
+    "warm": "Always warm up before exercises! Do 5-10 minutes of light cardio like walking. Gentle arm circles help warm up shoulders. This increases blood flow and reduces injury risk.",
+    "progress": "Track your progress by: 1) Noting pain levels (should decrease over time) 2) Range of motion improvements 3) Number of reps completed 4) Daily activities becoming easier. Progress takes time - be patient!",
+    "set": "The target sets and reps in your plan are a guide. Listen to your body. If you can complete the target with good form, aim for it! If not, reduce the number and focus on perfect technique.",
+    "modify": "If an exercise feels too easy or causes mild pain, it might be time to **modify** it. You can increase reps, sets, or hold the end position longer. **Always consult your physical therapist** before making major changes.",
+    "how long": "Rehabilitation length varies based on the injury's severity and your body's response. Typical plans are **4-8 weeks**, but consistent, gradual effort is more important than rushing the process.",
+}
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
-    # Placeholder; your full implementation should be here.
-    return {"response": "This is a chat response."}
+    try:
+        user_message = request.message
+        session_id = request.session_id
+        message_lower = user_message.lower()
+        for keyword, response in PREDEFINED_RESPONSES.items():
+            if keyword in message_lower:
+                return {"response": response}
+
+        if session_id not in active_chats:
+            system_instruction = ("You are Mia — a friendly, professional virtual rehabilitation assistant and coach...") # Instruction text omitted for brevity
+            chat_session = ai_client.chats.create(
+                model=MODEL_NAME,
+                config=GenerateContentConfig(system_instruction=system_instruction)
+            )
+            active_chats[session_id] = chat_session
+            print(f"New chat session created for ID: {session_id}")
+        else:
+            chat_session = active_chats[session_id]
+
+        gemini_response = chat_session.send_message(user_message)
+        bot_response = gemini_response.text
+        return {"response": bot_response}
+
+    except Exception as e:
+        print(f"Error in /api/chat: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"An AI or Server error occurred: {str(e)}")
+
 
 MODEL_PATH = 'model/cph_model.joblib'
 try:
@@ -523,7 +664,17 @@ except FileNotFoundError:
     print(f"⚠️ WARNING: Model file not found at {MODEL_PATH}. Prediction endpoint will fail.")
     CPH_MODEL = None
 
-MODEL_FEATURES = [ "Age", "Health_Score", "Injury_Ankle injury", ]
+MODEL_FEATURES = [
+    "Age", "Health_Score", "Injury_Ankle injury", "Injury_Back injury",
+    "Injury_Calf injury", "Injury_Coronavirus", "Injury_Foot injury",
+    "Injury_Groin injury", "Injury_Hamstring injury", "Injury_Hamstring strain",
+    "Injury_Ill", "Injury_Knee injury", "Injury_Knee surgery", "Injury_Knock",
+    "Injury_Shoulder injury", "Injury_ankle injury", "Injury_bruise",
+    "Injury_calf injury", "Injury_groin injury", "Injury_hamstring injury",
+    "Injury_hamstring strain", "Injury_ill", "Injury_knee injury",
+    "Injury_muscle injury", "Injury_unknown injury", "Previous_injury",
+    "Physio_adherence", "Complication_count", "Inflammation_marker"
+]
 
 class PredictionInput(BaseModel):
     Age: float = Field(..., description="Patient's age.")
@@ -536,8 +687,31 @@ class PredictionInput(BaseModel):
 
 @app.post("/api/predict_recovery")
 def predict_recovery(data: PredictionInput):
-    # Placeholder; your full implementation should be here.
-    return {"status": "success", "median_recovery_days": 42}
+    if CPH_MODEL is None:
+        raise HTTPException(status_code=503, detail="Prediction model is not available or failed to load.")
+    if not MODEL_FEATURES:
+        raise HTTPException(status_code=500, detail="Model features are missing. Cannot prepare input data.")
+    try:
+        patient_df = pd.DataFrame(0.0, index=[0], columns=MODEL_FEATURES)
+        input_dict = data.dict()
+        for feature in ["Age", "Health_Score", "Physio_adherence", "Complication_count", "Inflammation_marker", "Previous_injury"]:
+            if feature in patient_df.columns:
+                patient_df.loc[0, feature] = input_dict[feature]
+        injury_column_name = f"Injury_{input_dict['Injury_Type']}"
+        if injury_column_name in patient_df.columns:
+            patient_df.loc[0, injury_column_name] = 1.0
+        else:
+            print(f"Warning: Injury type '{injury_column_name}' not found in model features. Using default zero vector.")
+        patient_input = patient_df[MODEL_FEATURES]
+        median_recovery_time = CPH_MODEL.predict_median(patient_input)
+        predicted_days = int(median_recovery_time[0]) # Access first element of numpy array
+        return {
+            "status": "success",
+            "median_recovery_days": predicted_days
+        }
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Prediction processing failed: {str(e)}")
 
 # =========================================================================
 # 8. MAIN EXECUTION
