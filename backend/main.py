@@ -97,48 +97,28 @@ EXERCISE_CONFIGS = {
 }
 
 EXERCISE_PLANS = {
-    "shoulder injury": {"ailment": "shoulder injury", "exercises": [{ "name": "Shoulder Flexion", "description": "Raise your arm forward and up", "target_reps": 1, "sets": 1, "rest_seconds": 3 }, { "name": "Shoulder Abduction", "description": "Raise your arm out to the side", "target_reps": 12, "sets": 3, "rest_seconds": 30 }, { "name": "Shoulder Internal Rotation", "description": "Rotate arm inward, keeping elbow bent.", "target_reps": 10, "sets": 3, "rest_seconds": 30 }], "difficulty_level": "beginner", "duration_weeks": 6},
-    "leg/knee injury": {"ailment": "leg/knee injury", "exercises": [{ "name": "Knee Flexion", "description": "Slide your heel towards your hip.", "target_reps": 1, "sets": 1, "rest_seconds": 3 }, { "name": "Ankle Dorsiflexion", "description": "Pull your foot up toward your shin.", "target_reps": 15, "sets": 3, "rest_seconds": 30 }], "difficulty_level": "beginner", "duration_weeks": 6},
-    "elbow injury": {"ailment": "elbow injury", "exercises": [{ "name": "Elbow Flexion", "description": "Bend your elbow bringing hand toward shoulder", "target_reps": 1, "sets": 1, "rest_seconds": 3 }, { "name": "Elbow Extension", "description": "Straighten your elbow completely", "target_reps": 15, "sets": 3, "rest_seconds": 30 }], "difficulty_level": "beginner", "duration_weeks": 4},
-    "wrist injury": {"ailment": "wrist injury", "exercises": [{ "name": "Wrist Flexion", "description": "Bend your wrist forward and back.", "target_reps": 1, "sets": 1, "rest_seconds": 3 }], "difficulty_level": "beginner", "duration_weeks": 3}
+    "shoulder injury": {"ailment": "shoulder injury", "exercises": [{ "name": "Shoulder Flexion", "description": "Raise your arm forward and up", "target_reps": 5, "sets": 3, "rest_seconds": 30 }, { "name": "Shoulder Abduction", "description": "Raise your arm out to the side", "target_reps": 12, "sets": 3, "rest_seconds": 30 }, { "name": "Shoulder Internal Rotation", "description": "Rotate arm inward, keeping elbow bent.", "target_reps": 10, "sets": 3, "rest_seconds": 30 }], "difficulty_level": "beginner", "duration_weeks": 6},
+    "leg/knee injury": {"ailment": "leg/knee injury", "exercises": [{ "name": "Knee Flexion", "description": "Slide your heel towards your hip.",  "target_reps": 5, "sets": 3, "rest_seconds": 30 }, { "name": "Ankle Dorsiflexion", "description": "Pull your foot up toward your shin.", "target_reps": 15, "sets": 3, "rest_seconds": 30 }], "difficulty_level": "beginner", "duration_weeks": 6},
+    "elbow injury": {"ailment": "elbow injury", "exercises": [{ "name": "Elbow Flexion", "description": "Bend your elbow bringing hand toward shoulder",  "target_reps": 5, "sets": 3, "rest_seconds": 30}, { "name": "Elbow Extension", "description": "Straighten your elbow completely", "target_reps": 15, "sets": 3, "rest_seconds": 30 }], "difficulty_level": "beginner", "duration_weeks": 4},
+    "wrist injury": {"ailment": "wrist injury", "exercises": [{ "name": "Wrist Flexion", "description": "Bend your wrist forward and back.",  "target_reps": 5, "sets": 3, "rest_seconds": 30}], "difficulty_level": "beginner", "duration_weeks": 3}
 }
 
 # =========================================================================
 # 3. UTILITY & ANALYSIS FUNCTIONS
 # =========================================================================
-
 AnalysisResult = Tuple[float, Dict, List]
-
-def get_best_side(landmarks) -> Optional[str]:
-    return 'left'
-
-def calculate_angle_2d(a: Any, b: Any, c: Any) -> float:
-    return 0.0
-
-def get_2d_landmarks(landmarks: Any) -> List[Dict]:
-    if landmarks:
-        return [{"x": 0.5, "y": 0.5, "visibility": 1.0}] * 33
-    return []
-
-def calculate_accuracy(current_angle: float, min_range: float, max_range: float) -> float:
-    return 0.0
-
-def analyze_shoulder_flexion(landmarks: Any, side: str) -> AnalysisResult:
-    return 0.0, {}, []
-def analyze_shoulder_abduction(landmarks: Any, side: str) -> AnalysisResult:
-    return analyze_shoulder_flexion(landmarks, side)
-def analyze_shoulder_internal_rotation(landmarks: Any, side: str) -> AnalysisResult:
-    return 0.0, {}, []
-def analyze_elbow_flexion(landmarks: Any, side: str) -> AnalysisResult:
-    return 0.0, {}, []
-def analyze_elbow_extension(landmarks: Any, side: str) -> AnalysisResult:
-    return analyze_elbow_flexion(landmarks, side)
-def analyze_knee_flexion(landmarks: Any, side: str) -> AnalysisResult:
-    return 0.0, {}, []
-def analyze_ankle_dorsiflexion(landmarks: Any, side: str) -> AnalysisResult:
-    return 0.0, {}, []
-def analyze_wrist_flexion(landmarks: Any, side: str) -> AnalysisResult:
-    return 0.0, {}, []
+def get_best_side(landmarks) -> Optional[str]: return 'left'
+def calculate_angle_2d(a: Any, b: Any, c: Any) -> float: return 0.0
+def get_2d_landmarks(landmarks: Any) -> List[Dict]: return [{"x": 0.5, "y": 0.5, "visibility": 1.0}] * 33 if landmarks else []
+def calculate_accuracy(current_angle: float, min_range: float, max_range: float) -> float: return 0.0
+def analyze_shoulder_flexion(landmarks: Any, side: str) -> AnalysisResult: return 0.0, {}, []
+def analyze_shoulder_abduction(landmarks: Any, side: str) -> AnalysisResult: return analyze_shoulder_flexion(landmarks, side)
+def analyze_shoulder_internal_rotation(landmarks: Any, side: str) -> AnalysisResult: return 0.0, {}, []
+def analyze_elbow_flexion(landmarks: Any, side: str) -> AnalysisResult: return 0.0, {}, []
+def analyze_elbow_extension(landmarks: Any, side: str) -> AnalysisResult: return analyze_elbow_flexion(landmarks, side)
+def analyze_knee_flexion(landmarks: Any, side: str) -> AnalysisResult: return 0.0, {}, []
+def analyze_ankle_dorsiflexion(landmarks: Any, side: str) -> AnalysisResult: return 0.0, {}, []
+def analyze_wrist_flexion(landmarks: Any, side: str) -> AnalysisResult: return 0.0, {}, []
 
 ANALYSIS_MAP = {
     "shoulder flexion": analyze_shoulder_flexion, "shoulder abduction": analyze_shoulder_abduction,
@@ -146,7 +126,6 @@ ANALYSIS_MAP = {
     "elbow extension": analyze_elbow_extension, "knee flexion": analyze_knee_flexion,
     "ankle dorsiflexion": analyze_ankle_dorsiflexion, "wrist flexion": analyze_wrist_flexion,
 }
-
 
 # =========================================================================
 # 4. API ENDPOINTS
@@ -162,16 +141,8 @@ def get_exercise_plan(request: AilmentRequest):
 
 @app.post("/api/analyze_frame")
 def analyze_frame(request: FrameRequest):
-    global pose
-    reps, stage, last_rep_time = 0, "down", 0
-    angle, angle_coords, feedback, accuracy = 0, {}, [], 0.0
-    DEFAULT_STATE = {"reps": 0, "stage": "down", "last_rep_time": 0, "dynamic_max_angle": 0, "dynamic_min_angle": 180, "frame_count": 0, "partial_rep_buffer": 0.0, "analysis_side": None}
-
-    current_state = {**DEFAULT_STATE, **(request.previous_state or {})}
-    # ... (rest of the function is unchanged)
-    
+    # This is a placeholder; your full implementation should be here.
     return { "reps": 0, "feedback": [], "accuracy_score": 0.0, "state": {}, "drawing_landmarks": [], "current_angle": 0, "angle_coords": {}, }
-
 
 # =========================================================================
 # 5. API ENDPOINTS (Authentication, Session & Progress)
@@ -215,22 +186,22 @@ async def save_session(data: SessionData):
         raise HTTPException(status_code=500, detail=f"Server error during session save: {str(e)}")
 
 
-# 🟢 MODIFIED ENDPOINT: Now fetches patient details, determines ailment, and fixes accuracy scores.
 @app.get("/api/progress/{user_id}")
 async def get_progress(user_id: str):
     """Fetches and aggregates progress data, adding patient and injury context."""
     try:
-        # 1. Fetch Patient Details (Email)
-        # This queries the `auth.users` table. Ensure RLS policies allow server-side access.
+        # Fetch Patient Details (Email)
         patient_email = "Not Found"
         try:
+            # Note: This query requires RLS policies on `auth.users` to be configured
+            # to allow service roles to read the email column.
             user_data_res = supabase.from_("users").select("email").eq("id", user_id).single().execute()
             if user_data_res.data:
                 patient_email = user_data_res.data.get("email", "Not Found")
         except Exception:
             print(f"Could not fetch email for user_id: {user_id}. Check RLS on auth.users.")
 
-        # 2. Fetch Session Data
+        # Fetch Session Data
         sessions_res = supabase.table("user_sessions")\
             .select("exercise_name, reps_completed, accuracy_score, created_at, session_date")\
             .eq("user_id", user_id)\
@@ -246,7 +217,7 @@ async def get_progress(user_id: str):
                 "recent_sessions": []
             }
 
-        # 3. Determine Treated Ailment
+        # Determine Treated Ailment
         performed_exercises = {s['exercise_name'].lower() for s in sessions}
         ailment_scores = {}
         for plan_name, plan_details in EXERCISE_PLANS.items():
@@ -257,11 +228,10 @@ async def get_progress(user_id: str):
         
         treated_ailment = max(ailment_scores, key=ailment_scores.get) if ailment_scores else "General Fitness"
 
-        # 4. Aggregate Stats & FIX Accuracy (0-1 -> 0-100)
+        # Aggregate Stats & FIX Accuracy (Assume DB stores 0-100)
         total_sessions = len(sessions)
         total_reps = sum(s['reps_completed'] for s in sessions)
-        # Multiply by 100 here for correct percentage calculation
-        total_weighted_accuracy = sum(s['reps_completed'] * (s['accuracy_score'] * 100) for s in sessions)
+        total_weighted_accuracy = sum(s['reps_completed'] * s['accuracy_score'] for s in sessions)
         average_accuracy = total_weighted_accuracy / total_reps if total_reps > 0 else 0.0
 
         weekly_map = {day: {"reps": 0, "accuracy_sum": 0, "count": 0} for day in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]}
@@ -271,8 +241,7 @@ async def get_progress(user_id: str):
                 day_name = date_obj.strftime('%a')
                 if day_name in weekly_map:
                     weekly_map[day_name]['reps'] += session['reps_completed']
-                    # Multiply by 100 here before summing
-                    weekly_map[day_name]['accuracy_sum'] += session['accuracy_score'] * 100
+                    weekly_map[day_name]['accuracy_sum'] += session['accuracy_score']
                     weekly_map[day_name]['count'] += 1
             except (ValueError, KeyError, TypeError):
                 continue
@@ -288,8 +257,7 @@ async def get_progress(user_id: str):
                 "date": s['session_date'],
                 "exercise": s['exercise_name'],
                 "reps": s['reps_completed'],
-                # Multiply by 100 here for correct display
-                "accuracy": round(s['accuracy_score'] * 100, 1)
+                "accuracy": round(s['accuracy_score'], 1)
             } for s in sessions[:5]
         ]
 
@@ -307,23 +275,162 @@ async def get_progress(user_id: str):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Server error fetching progress: {str(e)}")
 
+
 # =========================================================================
 # 6. PDF REPORT GENERATION
 # =========================================================================
 
+# 🟢 FIX: The complete, non-empty CSS is here.
 PDF_CSS = """
-    /* ... (CSS remains the same as the previous version) ... */
+    @page {
+        size: A4;
+        margin: 1.5cm;
+    }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        color: #333;
+        font-size: 11px;
+    }
+    .header {
+        text-align: center;
+        border-bottom: 2px solid #4A90E2;
+        padding-bottom: 15px;
+        margin-bottom: 30px;
+    }
+    .header h1 {
+        margin: 0;
+        color: #4A90E2;
+        font-size: 26px;
+        font-weight: 600;
+    }
+    .header p {
+        margin: 5px 0 0;
+        color: #777;
+    }
+    h2 {
+        font-size: 16px;
+        color: #333;
+        border-bottom: 1px solid #eee;
+        padding-bottom: 8px;
+        margin-top: 30px;
+        margin-bottom: 20px;
+        font-weight: 600;
+        page-break-after: avoid;
+    }
+    .kpi-container {
+        display: flex;
+        gap: 15px;
+        justify-content: space-around;
+        text-align: center;
+        page-break-inside: avoid;
+    }
+    .kpi-card {
+        background-color: #f9f9f9;
+        border: 1px solid #eee;
+        border-radius: 8px;
+        padding: 15px;
+        flex: 1;
+    }
+    .kpi-card .label {
+        font-size: 11px;
+        color: #666;
+        margin-bottom: 8px;
+        text-transform: uppercase;
+    }
+    .kpi-card .value {
+        font-size: 24px;
+        font-weight: 600;
+        color: #4A90E2;
+    }
+    .week-day {
+        display: flex;
+        align-items: center;
+        margin-bottom: 10px;
+        page-break-inside: avoid;
+    }
+    .day-label {
+        width: 40px;
+        font-weight: bold;
+    }
+    .bars {
+        flex-grow: 1;
+        height: 22px;
+        background-color: #f0f0f0;
+        border-radius: 4px;
+        position: relative;
+    }
+    .rep-bar {
+        position: absolute;
+        height: 100%;
+        background-color: #4A90E2;
+        border-radius: 4px;
+    }
+    .stats {
+        width: 120px;
+        text-align: right;
+        font-size: 11px;
+        color: #555;
+    }
+    .session-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+        page-break-inside: avoid;
+    }
+    .session-table th, .session-table td {
+        border-bottom: 1px solid #eee;
+        padding: 10px;
+        text-align: left;
+    }
+    .session-table th {
+        font-weight: bold;
+        background-color: #f9f9f9;
+    }
+    .accuracy-cell { font-weight: bold; }
 """
 
+# 🟢 FIX: The complete, non-empty function bodies are here.
 def weekly_activity_html(weekly_data):
-    # ... (This function remains the same) ...
-    return ""
+    html = ""
+    max_reps = max([d['reps'] for d in weekly_data] + [1])
+    for day in weekly_data:
+        width_percent = (day['reps'] / max_reps) * 100 if max_reps > 0 else 0
+        html += f"""
+        <div class="week-day">
+            <div class="day-label">{day['day']}</div>
+            <div class="bars">
+                <div class="rep-bar" style="width:{width_percent}%;"></div>
+            </div>
+            <div class="stats">{day['reps']} reps | {day['accuracy']}% avg</div>
+        </div>"""
+    return html
 
 def recent_sessions_html(sessions):
-    # ... (This function remains the same) ...
-    return ""
+    rows = ""
+    for s in sessions:
+        try:
+            date_str = dt.fromisoformat(s['date']).strftime("%b %d, %Y")
+        except (ValueError, TypeError):
+            date_str = s.get('date', 'N/A')
 
-# 🟢 MODIFIED TEMPLATE: Now includes patient details and injury context.
+        color = "#16a34a" if s['accuracy'] > 90 else ("#f59e0b" if s['accuracy'] > 75 else "#dc2626")
+        rows += f"""
+        <tr>
+            <td>{date_str}</td>
+            <td>{s.get('exercise', 'N/A')}</td>
+            <td>{s.get('reps', 'N/A')}</td>
+            <td class="accuracy-cell" style="color: {color};">{s.get('accuracy', 0)}%</td>
+        </tr>"""
+
+    return f"""
+        <table class="session-table">
+            <thead>
+                <tr><th>Date</th><th>Exercise</th><th>Reps</th><th>Accuracy</th></tr>
+            </thead>
+            <tbody>{rows}</tbody>
+        </table>
+    """
+
 def build_html_content(data: Dict[str, Any]) -> str:
     """Generates the full HTML content string for the redesigned PDF report."""
     return f"""
@@ -342,16 +449,12 @@ def build_html_content(data: Dict[str, Any]) -> str:
         <h2>Patient Summary</h2>
         <div class="kpi-container">
             <div class="kpi-card">
-                <div class="label">Patient ID</div>
-                <div class="value" style="font-size: 12px;">{data.get('user_id', 'N/A')}</div>
-            </div>
-            <div class="kpi-card">
                 <div class="label">Patient Email</div>
-                <div class="value" style="font-size: 16px;">{data.get('patient_email', 'N/A')}</div>
+                <div class="value" style="font-size: 14px;">{data.get('patient_email', 'N/A')}</div>
             </div>
             <div class="kpi-card">
                 <div class="label">Recovery Focus</div>
-                <div class="value" style="font-size: 18px;">{data.get('treated_ailment', 'N/A')}</div>
+                <div class="value">{data.get('treated_ailment', 'N/A')}</div>
             </div>
         </div>
 
@@ -398,6 +501,7 @@ async def download_pdf_report(user_id: str):
             background=BackgroundTask(os.remove, PDF_FILENAME)
         )
     except Exception as e:
+        traceback.print_exc()
         if os.path.exists(PDF_FILENAME): os.remove(PDF_FILENAME)
         raise HTTPException(status_code=500, detail=f"Failed to generate PDF report: {str(e)}")
 
@@ -405,7 +509,35 @@ async def download_pdf_report(user_id: str):
 # =========================================================================
 # 7. CHAT & PREDICTION ENDPOINTS
 # =========================================================================
-# ... (These sections remain unchanged) ...
+PREDEFINED_RESPONSES = { "frequency": "For optimal recovery, exercise 3-5 times per week...", "rest": "Rest days are crucial for recovery!...", }
+
+@app.post("/api/chat")
+async def chat(request: ChatRequest):
+    # Placeholder; your full implementation should be here.
+    return {"response": "This is a chat response."}
+
+MODEL_PATH = 'model/cph_model.joblib'
+try:
+    CPH_MODEL = joblib.load(MODEL_PATH)
+except FileNotFoundError:
+    print(f"⚠️ WARNING: Model file not found at {MODEL_PATH}. Prediction endpoint will fail.")
+    CPH_MODEL = None
+
+MODEL_FEATURES = [ "Age", "Health_Score", "Injury_Ankle injury", ]
+
+class PredictionInput(BaseModel):
+    Age: float = Field(..., description="Patient's age.")
+    Health_Score: float = Field(..., description="General health rating (0.0 to 10.0).")
+    Physio_adherence: float = Field(..., description="Compliance with rehab plan (0.0 to 1.0).")
+    Complication_count: int = Field(..., description="Number of minor complications/setbacks.")
+    Inflammation_marker: float = Field(..., description="Inflammation score.")
+    Previous_injury: int = Field(0, description="1 if patient has previous injuries, 0 otherwise.")
+    Injury_Type: str = Field(..., description="The current type of injury.")
+
+@app.post("/api/predict_recovery")
+def predict_recovery(data: PredictionInput):
+    # Placeholder; your full implementation should be here.
+    return {"status": "success", "median_recovery_days": 42}
 
 # =========================================================================
 # 8. MAIN EXECUTION

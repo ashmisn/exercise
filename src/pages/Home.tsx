@@ -468,7 +468,7 @@ export const Home: React.FC<HomeProps> = ({ onStartSession }) => {
 
             <h1 className="text-3xl font-extrabold text-gray-900 ml-4 tracking-tight">
 
-              AI Rehab Dashboard
+              Your Dashboard
 
             </h1>
 
