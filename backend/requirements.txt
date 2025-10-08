@@ -13,3 +13,4 @@ joblib
 google-genai
 pandas
 lifelines
+gotrue
