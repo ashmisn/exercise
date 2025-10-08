@@ -257,7 +257,7 @@ export const Home: React.FC<HomeProps> = ({ onStartSession }) => {
 
       const contentDisposition = response.headers.get('Content-Disposition');
 
-const filename = `${userProfile.name}-Rebound-Report-${formattedDate}.pdf`;
+let filename = `${userProfile.name}-Rebound-Report-${formattedDate}.pdf`;
 
       if (contentDisposition && contentDisposition.indexOf('filename=') !== -1) {
 
