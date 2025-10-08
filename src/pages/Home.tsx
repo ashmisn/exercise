@@ -248,11 +248,16 @@ export const Home: React.FC<HomeProps> = ({ onStartSession }) => {
 
       const pdfBlob = new Blob([blob], { type: 'application/pdf' }); 
 
-      
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0'); // Months are 0-indexed, so we add 1
+    const day = String(today.getDate()).padStart(2, '0');
+    const formattedDate = `${year}-${month}-${day}`;
+
 
       const contentDisposition = response.headers.get('Content-Disposition');
 
-      let filename = `rehab_report_${user.id}.pdf`;
+const filename = `${userProfile.name}-Rebound-Report-${formattedDate}.pdf`;
 
       if (contentDisposition && contentDisposition.indexOf('filename=') !== -1) {
 
