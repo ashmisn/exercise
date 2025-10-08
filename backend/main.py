@@ -141,22 +141,14 @@ def get_exercise_plan(request: AilmentRequest):
 
 @app.post("/api/analyze_frame")
 def analyze_frame(request: FrameRequest):
-    # We must rely on the global 'pose' object for performance stability.
-    global pose 
-    
     reps, stage, last_rep_time = 0, "down", 0
     angle, angle_coords, feedback, accuracy = 0, {}, [], 0.0
     DEFAULT_STATE = {"reps": 0, "stage": "down", "last_rep_time": 0, "dynamic_max_angle": 0, "dynamic_min_angle": 180, "frame_count": 0, "partial_rep_buffer": 0.0, "analysis_side": None}
-    
-    current_state = {**DEFAULT_STATE, **(request.previous_state or {})}
-    reps = current_state["reps"]
-    stage = current_state["stage"]
-    last_rep_time = current_state["last_rep_time"]
-    dynamic_max_angle = current_state["dynamic_max_angle"]
-    dynamic_min_angle = current_state["dynamic_min_angle"]
-    frame_count = current_state["frame_count"]
-    partial_rep_buffer = current_state["partial_rep_buffer"]
-    analysis_side = current_state["analysis_side"]
+    current_state = request.previous_state or DEFAULT_STATE
+    reps, stage, last_rep_time = current_state.get("reps", 0), current_state.get("stage", "down"), current_state.get("last_rep_time", 0)
+    dynamic_max_angle, dynamic_min_angle = current_state.get("dynamic_max_angle", 0), current_state.get("dynamic_min_angle", 180)
+    frame_count, partial_rep_buffer = current_state.get("frame_count", 0), current_state.get("partial_rep_buffer", 0.0)
+    analysis_side = current_state.get("analysis_side", None)
 
     try:
         header, encoded = request.frame.split(',', 1) if ',' in request.frame else ('', request.frame)
@@ -164,12 +156,10 @@ def analyze_frame(request: FrameRequest):
         nparr = np.frombuffer(img_data, np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-        if frame is None or frame.size == 0: 
-            return {"reps": reps, "feedback": [{"type": "warning", "message": "Video stream data corrupted."}], "accuracy_score": 0.0, "state": current_state, "drawing_landmarks": [], "current_angle": 0, "angle_coords": {}}
+        if frame is None or frame.size == 0: return {"reps": reps, "feedback": [{"type": "warning", "message": "Video stream data corrupted."}], "accuracy_score": 0.0, "state": current_state, "drawing_landmarks": [], "current_angle": 0, "angle_coords": {}}
 
         image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = pose.process(image_rgb)
-        
         landmarks = None
         
         if not results.pose_landmarks:
@@ -190,7 +180,7 @@ def analyze_frame(request: FrameRequest):
                         angle, angle_coords, analysis_feedback = analysis_func(landmarks, analysis_side)
                         feedback.extend(analysis_feedback)
                         
-                        if not analysis_feedback:
+                        if not analysis_feedback: 
                             CALIBRATION_FRAMES, DEBOUNCE_TIME = config['calibration_frames'], config['debounce']
                             current_time = time.time()
                             
@@ -199,16 +189,16 @@ def analyze_frame(request: FrameRequest):
                                 dynamic_min_angle = min(dynamic_min_angle, angle)
                                 frame_count += 1
                                 feedback.append({"type": "progress", "message": f"Calibrating range ({frame_count}/{CALIBRATION_FRAMES}). Move fully from start to finish position."})
-                                accuracy = 0.0
+                                accuracy = 0.0 
                                 
                             if frame_count >= CALIBRATION_FRAMES or reps > 0:
                                 CALIBRATED_MIN_ANGLE, CALIBRATED_MAX_ANGLE = dynamic_min_angle, dynamic_max_angle
-                                MIN_ANGLE_THRESHOLD_FULL, MAX_ANGLE_THRESHOLD_FULL = CALIBRATED_MIN_ANGLE + 5, CALIBRATED_MAX_ANGLE - 5
-                                MIN_ANGLE_THRESHOLD_PARTIAL, MAX_ANGLE_THRESHOLD_PARTIAL = CALIBRATED_MIN_ANGLE + 20, CALIBRATED_MAX_ANGLE - 20
+                                MIN_ANGLE_THRESHOLD_FULL, MAX_ANGLE_THRESHOLD_FULL = CALIBRATED_MIN_ANGLE + 5, CALIBRATED_MAX_ANGLE - 5 
+                                MIN_ANGLE_THRESHOLD_PARTIAL, MAX_ANGLE_THRESHOLD_PARTIAL = CALIBRATED_MIN_ANGLE + 20, CALIBRATED_MAX_ANGLE - 20 
                                 frame_accuracy = calculate_accuracy(angle, CALIBRATED_MIN_ANGLE, CALIBRATED_MAX_ANGLE)
-                                accuracy = frame_accuracy
+                                accuracy = frame_accuracy 
 
-                                if angle < MIN_ANGLE_THRESHOLD_PARTIAL:
+                                if angle < MIN_ANGLE_THRESHOLD_PARTIAL: 
                                     stage = "up"
                                     feedback.append({"type": "instruction", "message": "Hold contracted position at the top!" if angle < MIN_ANGLE_THRESHOLD_FULL else "Go deeper for a full rep."})
                                 
@@ -220,11 +210,11 @@ def analyze_frame(request: FrameRequest):
                                             
                                         if rep_amount > 0:
                                             stage, partial_rep_buffer, last_rep_time = "down", partial_rep_buffer + rep_amount, current_time
-                                            if partial_rep_buffer >= 1.0: reps, partial_rep_buffer = reps + int(partial_rep_buffer), partial_rep_buffer % 1.0
+                                            if partial_rep_buffer >= 1.0: reps, partial_rep_buffer = reps + int(partial_rep_buffer), partial_rep_buffer % 1.0 
                                             feedback.append({"type": "encouragement", "message": f"{success_message} Total reps: {reps}"})
                                         else: feedback.append({"type": "warning", "message": "Incomplete return to starting position."})
                                     else: feedback.append({"type": "warning", "message": "Slow down! Ensure controlled return."})
-                                    
+                                        
                                 if not any(f['type'] in ['warning', 'instruction', 'encouragement'] for f in feedback):
                                     if stage == 'up' and angle > MIN_ANGLE_THRESHOLD_FULL: feedback.append({"type": "progress", "message": "Push further to the maximum range."})
                                     elif stage == 'down' and angle < MAX_ANGLE_THRESHOLD_FULL: feedback.append({"type": "progress", "message": "Return fully to the starting position."})
@@ -232,37 +222,17 @@ def analyze_frame(request: FrameRequest):
                                     elif stage == 'up': feedback.append({"type": "progress", "message": "Controlled movement upward."})
                     else: feedback.append({"type": "warning", "message": "Analysis function missing."})
         
-        # 🟢 FIX: Convert accuracy from a decimal (e.g., 0.95) to a percentage (e.g., 95.0)
-        final_accuracy_display = accuracy * 100
-
+        final_accuracy_display = accuracy 
         drawing_landmarks = get_2d_landmarks(landmarks) if landmarks else []
         new_state = {"reps": reps, "stage": stage, "angle": round(angle, 1), "last_rep_time": last_rep_time, "dynamic_max_angle": dynamic_max_angle, "dynamic_min_angle": dynamic_min_angle, "frame_count": frame_count, "partial_rep_buffer": partial_rep_buffer, "analysis_side": analysis_side}
 
-        return {
-            "reps": reps, 
-            "feedback": feedback if feedback else [{"type": "progress", "message": "Processing..."}], 
-            "accuracy_score": round(final_accuracy_display, 2), 
-            "state": new_state, 
-            "drawing_landmarks": drawing_landmarks, 
-            "current_angle": round(angle, 1), 
-            "angle_coords": angle_coords, 
-            "min_angle": round(dynamic_min_angle, 1), 
-            "max_angle": round(dynamic_max_angle, 1), 
-            "side": analysis_side
-        }
+        return {"reps": reps, "feedback": feedback if feedback else [{"type": "progress", "message": "Processing..."}], "accuracy_score": round(final_accuracy_display, 2), "state": new_state, "drawing_landmarks": drawing_landmarks, "current_angle": round(angle, 1), "angle_coords": angle_coords, "min_angle": round(dynamic_min_angle, 1), "max_angle": round(dynamic_max_angle, 1), "side": analysis_side}
 
     except Exception as e:
-        # Crucial for catching the intermittent MediaPipe timestamp error 
-        # and preventing the server from crashing into a 502 error state.
-        error_detail = str(e)
-        if "Packet timestamp mismatch" in error_detail or "CalculatorGraph::Run() failed" in error_detail:
-              print(f"Handled MediaPipe Timestamp Error: {error_detail}")
-              # Return a temporary error message that allows the client to retry
-              raise HTTPException(status_code=400, detail="Transient analysis error. Please try again.")
-        
-        print(f"CRITICAL ERROR in analyze_frame: {error_detail}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Unexpected server error during analysis: {error_detail}")
+        print(f"CRITICAL ERROR in analyze_frame: {e}")
+        traceback.print_exc() 
+        raise HTTPException(status_code=500, detail=f"Unexpected server error during analysis: {str(e)}")
+
 
 # =========================================================================
 # 5. API ENDPOINTS (Authentication, Session & Progress)
