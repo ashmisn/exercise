@@ -704,7 +704,7 @@ def predict_recovery(data: PredictionInput):
             print(f"Warning: Injury type '{injury_column_name}' not found in model features. Using default zero vector.")
         patient_input = patient_df[MODEL_FEATURES]
         median_recovery_time = CPH_MODEL.predict_median(patient_input)
-        predicted_days = int(median_recovery_time[0]) # Access first element of numpy array
+        predicted_days = int(median_recovery_time) # Access first element of numpy array
         return {
             "status": "success",
             "median_recovery_days": predicted_days
