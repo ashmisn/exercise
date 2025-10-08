@@ -6,20 +6,19 @@ import time
 import json
 import datetime
 import traceback
-import requests
 import io
-import tempfile
 from datetime import datetime as dt
 from typing import List, Optional, Dict, Any, Tuple
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel,Field
-from weasyprint import HTML, CSS
+from pydantic import BaseModel, Field
+from weasyprint import HTML
 from starlette.background import BackgroundTask
 
 from supabase import create_client, Client
+from gotrue.errors import AuthApiError
 from google import genai
 from google.genai.types import GenerateContentConfig
 import mediapipe as mp
@@ -82,8 +81,6 @@ class FrameRequest(BaseModel): frame: str; exercise_name: str; previous_state: D
 class AilmentRequest(BaseModel): ailment: str
 class SessionData(BaseModel): user_id: str; exercise_name: str; reps_completed: int; accuracy_score: float
 class ChatRequest(BaseModel): message: str; session_id: str
-
-# 🟢 NEW: Pydantic model for authentication requests
 class UserCredentials(BaseModel):
     email: str
     password: str
@@ -278,7 +275,6 @@ def analyze_frame(request: FrameRequest):
 # 5. API ENDPOINTS (Authentication, Session & Progress)
 # =========================================================================
 
-# 🟢 START: NEW AUTHENTICATION ENDPOINTS
 @app.post("/api/auth/signup")
 async def signup(credentials: UserCredentials):
     """Handles user registration via Supabase."""
@@ -287,16 +283,13 @@ async def signup(credentials: UserCredentials):
             "email": credentials.email,
             "password": credentials.password,
         })
-        # Check for errors in the response from Supabase
         if res.user is None and res.session is None:
-             # This generic message is safer than exposing Supabase's specific errors
             raise HTTPException(status_code=400, detail="Could not sign up user. The user may already exist or password might be too weak.")
-        return {"message": "Signup successful! Please check your email to verify your account.", "user": res.user.id}
+        return {"message": "Signup successful! Please check your email to verify your account.", "user_id": res.user.id}
+    except AuthApiError as e:
+        raise HTTPException(status_code=400, detail=e.message)
     except Exception as e:
         print(f"Error during signup: {e}")
-        # Re-raise HTTPExceptions, handle others generically
-        if isinstance(e, HTTPException):
-            raise e
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -308,21 +301,17 @@ async def signin(credentials: UserCredentials):
             "email": credentials.email,
             "password": credentials.password
         })
-        # Check for successful sign-in
-        if res.session and res.user:
-            return {
-                "message": "Signin successful!",
-                "access_token": res.session.access_token,
-                "user_id": res.user.id
-            }
-        else:
-            raise HTTPException(status_code=401, detail="Invalid login credentials.")
+        return {
+            "message": "Signin successful!",
+            "access_token": res.session.access_token,
+            "user_id": res.user.id
+        }
+    except AuthApiError:
+        raise HTTPException(status_code=401, detail="Invalid login credentials")
     except Exception as e:
-        print(f"Error during signin: {e}")
-        if isinstance(e, HTTPException):
-            raise e
-        raise HTTPException(status_code=500, detail="An error occurred during sign-in.")
-# 🟢 END: NEW AUTHENTICATION ENDPOINTS
+        print(f"Unexpected error during signin: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
 
 
 @app.post("/api/save_session")
@@ -358,32 +347,40 @@ async def get_progress(user_id: str):
             .eq("user_id", user_id)\
             .order("created_at", desc=True)\
             .execute()
+
         sessions = response.data
+
         if not sessions:
-            return {"user_id": user_id, "total_sessions": 0, "total_reps": 0, "average_accuracy": 0.0, "streak_days": 0, "weekly_data": [{"day": day, "reps": 0, "accuracy": 0.0} for day in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]], "recent_sessions": []}
+            return {
+                "user_id": user_id, "total_sessions": 0, "total_reps": 0, "average_accuracy": 0.0, "streak_days": 0,
+                "weekly_data": [{"day": day, "reps": 0, "accuracy": 0.0} for day in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]],
+                "recent_sessions": []
+            }
 
         total_sessions = len(sessions)
         total_reps = sum(s['reps_completed'] for s in sessions)
         average_accuracy = sum(s['reps_completed'] * s['accuracy_score'] for s in sessions) / total_reps if total_reps > 0 else 0.0
 
         recent_sessions = sessions[:5]
-        weekly_map = {day: {"reps": 0, "accuracy_sum": 0, "count": 0} for day in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]}
 
+        weekly_map = {day: {"reps": 0, "accuracy_sum": 0, "count": 0} for day in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]}
         for session in sessions:
             try:
-                date_obj = dt.fromisoformat(session['created_at'].replace('Z', '+00:00'))
+                date_str = session['created_at'].replace('Z', '+00:00')
+                date_obj = dt.fromisoformat(date_str)
                 day_name = date_obj.strftime('%a')
                 if day_name in weekly_map:
                     weekly_map[day_name]['reps'] += session['reps_completed']
                     weekly_map[day_name]['accuracy_sum'] += session['accuracy_score']
                     weekly_map[day_name]['count'] += 1
-            except (ValueError, KeyError):
+            except (ValueError, KeyError, TypeError):
                 continue
 
         weekly_data = []
         for day_name in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]:
             data = weekly_map[day_name]
-            weekly_data.append({"day": day_name, "reps": data['reps'], "accuracy": round(data['accuracy_sum'] / data['count'], 1) if data['count'] > 0 else 0.0})
+            avg_accuracy = round(data['accuracy_sum'] / data['count'], 1) if data['count'] > 0 else 0.0
+            weekly_data.append({"day": day_name, "reps": data['reps'], "accuracy": avg_accuracy})
 
         return {
             "user_id": user_id,
@@ -398,294 +395,213 @@ async def get_progress(user_id: str):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Server error fetching progress: {str(e)}")
 
+
 # =========================================================================
 # 6. PDF REPORT GENERATION
 # =========================================================================
 
-# Place this helper function before your get_progress endpoint
-def generate_advanced_analysis(sessions: List[Dict]) -> Dict[str, Any]:
-    """Takes raw session data and computes advanced metrics and insights."""
-    if not sessions:
-        return {
-            "consistency_last_30_days": 0,
-            "accuracy_trend": "N/A",
-            "best_exercise": "N/A",
-            "improvement_area": "N/A",
-            "recommendation": "Start your first session to begin tracking your progress!"
-        }
-
-    df = pd.DataFrame(sessions)
-    df['session_date'] = pd.to_datetime(df['session_date'])
-    
-    # 1. Consistency
-    thirty_days_ago = dt.now() - datetime.timedelta(days=30)
-    active_days = df[df['session_date'] > thirty_days_ago]['session_date'].nunique()
-    consistency = (active_days / 30) * 100
-
-    # 2. Accuracy Trend
-    df = df.sort_values('session_date').reset_index(drop=True)
-    first_half_accuracy = df.loc[:len(df)//2, 'accuracy_score'].mean()
-    second_half_accuracy = df.loc[len(df)//2:, 'accuracy_score'].mean()
-    accuracy_trend = "Improving" if second_half_accuracy > first_half_accuracy else "Needs Focus"
-    if abs(second_half_accuracy - first_half_accuracy) < 2:
-        accuracy_trend = "Stable"
-
-    # 3. Best and Worst Exercises
-    exercise_accuracy = df.groupby('exercise_name')['accuracy_score'].mean()
-    best_exercise = exercise_accuracy.idxmax() if not exercise_accuracy.empty else "N/A"
-    improvement_area = exercise_accuracy.idxmin() if not exercise_accuracy.empty else "N/A"
-
-    # 4. Generate a smart recommendation
-    recommendation = f"Your accuracy is {accuracy_trend.lower()}! Keep up the great work."
-    if accuracy_trend == "Needs Focus":
-        recommendation = f"Focus on your form, especially for {improvement_area}. Slow, controlled movements will help improve your accuracy."
-    elif consistency < 50:
-        recommendation = "Consistency is key to recovery. Try to build a regular schedule, even if the sessions are short."
-
-    return {
-        "consistency_last_30_days": round(consistency),
-        "accuracy_trend": accuracy_trend,
-        "best_exercise": f"{best_exercise} ({exercise_accuracy.max():.1f}%)",
-        "improvement_area": f"{improvement_area} ({exercise_accuracy.min():.1f}%)",
-        "recommendation": recommendation
-    }
-
-# NOW, UPDATE get_progress to include this analysis
-@app.get("/api/progress/{user_id}")
-async def get_progress(user_id: str):
-    """Fetches and aggregates progress data, now with advanced analysis."""
-    # ... (the start of your function to fetch 'sessions' from Supabase remains the same)
-    
-    # --- Start of existing code ---
-    try:
-        response = supabase.table("user_sessions")\
-            .select("exercise_name, reps_completed, accuracy_score, created_at, session_date")\
-            .eq("user_id", user_id)\
-            .order("created_at", desc=True)\
-            .execute()
-        sessions = response.data
-    # --- End of existing code ---
-
-        # 🟢 NEW: Generate advanced insights if sessions exist
-        advanced_analysis = generate_advanced_analysis(sessions)
-
-        if not sessions:
-             # Return a default structure if no data
-            return {
-                "user_id": user_id, "total_sessions": 0, "total_reps": 0, "average_accuracy": 0.0,
-                "weekly_data": [{"day": day, "reps": 0, "accuracy": 0.0} for day in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]],
-                "recent_sessions": [],
-                "advanced_analysis": advanced_analysis
-            }
-
-    # --- The rest of your aggregation logic remains the same ---
-        total_sessions = len(sessions)
-        total_reps = sum(s['reps_completed'] for s in sessions)
-        average_accuracy = sum(s['reps_completed'] * s['accuracy_score'] for s in sessions) / total_reps if total_reps > 0 else 0.0
-        # ... (weekly data calculation) ...
-        # ---
-        
-        # 🟢 MODIFIED RETURN: Add the new analysis dictionary
-        return {
-            "user_id": user_id,
-            "total_sessions": total_sessions,
-            "total_reps": total_reps,
-            "average_accuracy": round(average_accuracy, 1),
-            "streak_days": 0, # Note: streak logic can be added to advanced_analysis if needed
-            "weekly_data": weekly_data,
-            "recent_sessions": [{"date": s['session_date'], "exercise": s['exercise_name'], "reps": s['reps_completed'], "accuracy": round(s['accuracy_score'], 1)} for s in recent_sessions],
-            "advanced_analysis": advanced_analysis # Add the new data here
-        }
-
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Server error fetching progress: {str(e)}")
-# 🟢 NEW: A professional CSS stylesheet for the report
 PDF_CSS = """
     @page {
         size: A4;
-        margin: 1cm;
-        @bottom-center {
-            content: 'Page ' counter(page) ' of ' counter(pages);
-            font-size: 10px;
-            color: #666;
-        }
+        margin: 1.5cm;
     }
     body {
-        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
         color: #333;
-        font-size: 12px;
+        font-size: 11px;
     }
     .header {
         text-align: center;
-        border-bottom: 2px solid #0056b3;
-        padding-bottom: 10px;
-        margin-bottom: 20px;
+        border-bottom: 2px solid #4A90E2;
+        padding-bottom: 15px;
+        margin-bottom: 30px;
     }
     .header h1 {
         margin: 0;
-        color: #0056b3;
-        font-size: 28px;
+        color: #4A90E2;
+        font-size: 26px;
+        font-weight: 600;
     }
     .header p {
         margin: 5px 0 0;
-        color: #555;
+        color: #777;
     }
     h2 {
-        font-size: 18px;
-        color: #004085;
-        border-bottom: 1px solid #ddd;
-        padding-bottom: 5px;
-        margin-top: 25px;
+        font-size: 16px;
+        color: #333;
+        border-bottom: 1px solid #eee;
+        padding-bottom: 8px;
+        margin-top: 30px;
+        margin-bottom: 20px;
+        font-weight: 600;
         page-break-after: avoid;
     }
-    .grid {
+    .kpi-container {
         display: flex;
         gap: 15px;
-        width: 100%;
+        justify-content: space-around;
+        text-align: center;
+        page-break-inside: avoid;
     }
-    .col { flex: 1; }
     .kpi-card {
-        background-color: #f8f9fa;
-        border: 1px solid #dee2e6;
+        background-color: #f9f9f9;
+        border: 1px solid #eee;
         border-radius: 8px;
         padding: 15px;
-        text-align: center;
-        margin-bottom: 15px;
-        page-break-inside: avoid;
+        flex: 1;
     }
     .kpi-card .label {
-        font-size: 12px;
-        color: #6c757d;
-        margin-bottom: 5px;
+        font-size: 11px;
+        color: #666;
+        margin-bottom: 8px;
+        text-transform: uppercase;
     }
     .kpi-card .value {
-        font-size: 22px;
-        font-weight: bold;
-        color: #0056b3;
+        font-size: 24px;
+        font-weight: 600;
+        color: #4A90E2;
     }
-    .recommendation-box {
-        background-color: #e7f3ff;
-        border-left: 5px solid #0056b3;
-        padding: 15px;
-        margin: 20px 0;
+    .week-day {
+        display: flex;
+        align-items: center;
+        margin-bottom: 10px;
         page-break-inside: avoid;
     }
-    .recommendation-box p { margin: 0; font-size: 14px; font-style: italic; }
-    
-    .session-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    .day-label {
+        width: 40px;
+        font-weight: bold;
+    }
+    .bars {
+        flex-grow: 1;
+        height: 22px;
+        background-color: #f0f0f0;
+        border-radius: 4px;
+        position: relative;
+    }
+    .rep-bar {
+        position: absolute;
+        height: 100%;
+        background-color: #4A90E2;
+        border-radius: 4px;
+    }
+    .stats {
+        width: 120px;
+        text-align: right;
+        font-size: 11px;
+        color: #555;
+    }
+    .session-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+        page-break-inside: avoid;
+    }
     .session-table th, .session-table td {
-        border: 1px solid #ddd;
-        padding: 8px;
+        border-bottom: 1px solid #eee;
+        padding: 10px;
         text-align: left;
     }
-    .session-table th { background-color: #f2f2f2; }
+    .session-table th {
+        font-weight: bold;
+        background-color: #f9f9f9;
+    }
     .accuracy-cell { font-weight: bold; }
 """
 
-# 🟢 REPLACED: Your old HTML helper functions are no longer needed.
-# This single function builds the entire, much-improved report.
+def weekly_activity_html(weekly_data):
+    html = ""
+    max_reps = max([d['reps'] for d in weekly_data] + [1])
+    for day in weekly_data:
+        width_percent = (day['reps'] / max_reps) * 100 if max_reps > 0 else 0
+        html += f"""
+        <div class="week-day">
+            <div class="day-label">{day['day']}</div>
+            <div class="bars">
+                <div class="rep-bar" style="width:{width_percent}%;"></div>
+            </div>
+            <div class="stats">{day['reps']} reps | {day['accuracy']}% avg</div>
+        </div>"""
+    return html
+
+def recent_sessions_html(sessions):
+    rows = ""
+    for s in sessions:
+        try:
+            date_str = dt.fromisoformat(s['date']).strftime("%b %d, %Y")
+        except (ValueError, TypeError):
+            date_str = s.get('date', 'N/A')
+
+        color = "#16a34a" if s['accuracy'] > 90 else ("#f59e0b" if s['accuracy'] > 75 else "#dc2626")
+        rows += f"""
+        <tr>
+            <td>{date_str}</td>
+            <td>{s.get('exercise', 'N/A')}</td>
+            <td>{s.get('reps', 'N/A')}</td>
+            <td class="accuracy-cell" style="color: {color};">{s.get('accuracy', 0)}%</td>
+        </tr>"""
+
+    return f"""
+        <table class="session-table">
+            <thead>
+                <tr><th>Date</th><th>Exercise</th><th>Reps</th><th>Accuracy</th></tr>
+            </thead>
+            <tbody>{rows}</tbody>
+        </table>
+    """
 
 def build_html_content(data: Dict[str, Any]) -> str:
-    """Generates the full HTML content string for the new PDF report."""
-
-    # Helper to generate the recent sessions table
-    def generate_sessions_table(sessions):
-        if not sessions:
-            return "<p>No recent sessions to display.</p>"
-        rows = ""
-        for s in sessions:
-            date_str = pd.to_datetime(s['date']).strftime("%b %d, %Y")
-            color = "#16a34a" if s['accuracy'] > 90 else ("#f59e0b" if s['accuracy'] > 75 else "#dc2626")
-            rows += f"""
-                <tr>
-                    <td>{date_str}</td>
-                    <td>{s['exercise']}</td>
-                    <td>{s['reps']}</td>
-                    <td class="accuracy-cell" style="color: {color};">{s['accuracy']}%</td>
-                </tr>
-            """
-        return f"""
-            <table class="session-table">
-                <thead><tr><th>Date</th><th>Exercise</th><th>Reps</th><th>Accuracy</th></tr></thead>
-                <tbody>{rows}</tbody>
-            </table>
-        """
-
-    # Extract advanced analysis data with safe fallbacks
-    analysis = data.get("advanced_analysis", {})
-
+    """Generates the full HTML content string for the redesigned PDF report."""
     return f"""
     <html>
     <head>
         <meta charset="UTF-8">
-        <title>Mobility Recovery Report</title>
+        <title>Rebound Report</title>
         <style>{PDF_CSS}</style>
     </head>
     <body>
         <div class="header">
-            <h1>Mobility Recovery Report</h1>
-            <p>User ID: {data['user_id']} | Generated on: {dt.now().strftime('%B %d, %Y')}</p>
+            <h1>Rebound Report</h1>
+            <p>User ID: {data['user_id']} | Generated: {dt.now().strftime('%B %d, %Y')}</p>
         </div>
 
-        <h2>Executive Summary</h2>
-        <div class="recommendation-box">
-            <p><strong>Recommendation:</strong> {analysis.get('recommendation', 'N/A')}</p>
-        </div>
-        
-        <div class="grid">
-            <div class="col">
-                <div class="kpi-card">
-                    <div class="label">Total Sessions</div>
-                    <div class="value">{data['total_sessions']}</div>
-                </div>
-                <div class="kpi-card">
-                    <div class="label">Overall Accuracy</div>
-                    <div class="value">{data['average_accuracy']:.1f}%</div>
-                </div>
-                <div class="kpi-card">
-                    <div class="label">Best Exercise</div>
-                    <div class="value" style="font-size: 16px;">{analysis.get('best_exercise', 'N/A')}</div>
-                </div>
+        <h2>Overall Stats</h2>
+        <div class="kpi-container">
+            <div class="kpi-card">
+                <div class="label">Total Sessions</div>
+                <div class="value">{data.get('total_sessions', 0)}</div>
             </div>
-            <div class="col">
-                <div class="kpi-card">
-                    <div class="label">Total Repetitions</div>
-                    <div class="value">{data['total_reps']}</div>
-                </div>
-                <div class="kpi-card">
-                    <div class="label">Accuracy Trend</div>
-                    <div class="value">{analysis.get('accuracy_trend', 'N/A')}</div>
-                </div>
-                <div class="kpi-card">
-                    <div class="label">Area for Improvement</div>
-                    <div class="value" style="font-size: 16px;">{analysis.get('improvement_area', 'N/A')}</div>
-                </div>
+            <div class="kpi-card">
+                <div class="label">Total Reps</div>
+                <div class="value">{data.get('total_reps', 0)}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="label">Average Accuracy</div>
+                <div class="value">{data.get('average_accuracy', 0):.1f}%</div>
             </div>
         </div>
+
+        <h2>Weekly Activity</h2>
+        {weekly_activity_html(data.get('weekly_data', []))}
 
         <h2>Recent Sessions</h2>
-        {generate_sessions_table(data.get('recent_sessions', []))}
+        {recent_sessions_html(data.get('recent_sessions', []))}
     </body>
     </html>
     """
-# This endpoint remains the same, as the logic is now encapsulated elsewhere.
+
 @app.get("/api/pdf/{user_id}")
 async def download_pdf_report(user_id: str):
     """Generates and serves a PDF report for a user."""
-    PDF_FILENAME = f"mobility_report_{user_id}_{dt.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+    PDF_FILENAME = f"Rebound Report {dt.now().strftime('%Y-%m-%d')}.pdf"
     try:
-        # This now returns the data with the advanced_analysis dictionary inside
         data = await get_progress(user_id)
-        
+
         if not isinstance(data, dict) or data.get("total_sessions") == 0:
-            raise HTTPException(status_code=404, detail="No session data found for this user to generate a report.")
-        
-        # This now builds the new, professional-looking HTML
+            raise HTTPException(status_code=404, detail="No session data to generate a report.")
+
         html_content = build_html_content(data)
-        
         HTML(string=html_content).write_pdf(PDF_FILENAME)
-        
+
         headers = {'Content-Disposition': f'attachment; filename="{PDF_FILENAME}"'}
         print(f"File created successfully: {PDF_FILENAME}. Preparing to send...")
         return FileResponse(
@@ -702,7 +618,7 @@ async def download_pdf_report(user_id: str):
         print(f"Error generating or serving PDF: {e}")
         traceback.print_exc()
         if os.path.exists(PDF_FILENAME): os.remove(PDF_FILENAME)
-        raise HTTPException(status_code=500, detail=f"Failed to generate PDF report. Error: {str(e)}")    
+        raise HTTPException(status_code=500, detail=f"Failed to generate PDF report: {str(e)}")
 
 # =========================================================================
 # 7. CHAT & PREDICTION ENDPOINTS
@@ -796,7 +712,7 @@ def predict_recovery(data: PredictionInput):
             print(f"Warning: Injury type '{injury_column_name}' not found in model features. Using default zero vector.")
         patient_input = patient_df[MODEL_FEATURES]
         median_recovery_time = CPH_MODEL.predict_median(patient_input)
-        predicted_days = int(median_recovery_time[0]) # Access first element of numpy array
+        predicted_days = int(median_recovery_time[0])
         return {
             "status": "success",
             "median_recovery_days": predicted_days
