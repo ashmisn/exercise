@@ -141,7 +141,8 @@ def get_exercise_plan(request: AilmentRequest):
 
 @app.post("/api/analyze_frame")
 def analyze_frame(request: FrameRequest):
-    global pose
+    # We must rely on the global 'pose' object for performance stability.
+    global pose 
     
     reps, stage, last_rep_time = 0, "down", 0
     angle, angle_coords, feedback, accuracy = 0, {}, [], 0.0
@@ -157,20 +158,19 @@ def analyze_frame(request: FrameRequest):
     partial_rep_buffer = current_state["partial_rep_buffer"]
     analysis_side = current_state["analysis_side"]
 
-    landmarks = None
-    drawing_landmarks = [] # Initialize to empty list
-
     try:
         header, encoded = request.frame.split(',', 1) if ',' in request.frame else ('', request.frame)
         img_data = base64.b64decode(encoded)
         nparr = np.frombuffer(img_data, np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-        if frame is None or frame.size == 0:
+        if frame is None or frame.size == 0: 
             return {"reps": reps, "feedback": [{"type": "warning", "message": "Video stream data corrupted."}], "accuracy_score": 0.0, "state": current_state, "drawing_landmarks": [], "current_angle": 0, "angle_coords": {}}
 
         image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = pose.process(image_rgb)
+        
+        landmarks = None
         
         if not results.pose_landmarks:
             feedback.append({"type": "warning", "message": "No pose detected. Adjust camera view."})
@@ -187,10 +187,7 @@ def analyze_frame(request: FrameRequest):
                 else:
                     analysis_func = ANALYSIS_MAP.get(exercise_name)
                     if analysis_func:
-                        # Note: The 'analysis_func' and 'calculate_accuracy' must be fully implemented
-                        # for the angle and accuracy values to be meaningful.
                         angle, angle_coords, analysis_feedback = analysis_func(landmarks, analysis_side)
-                        
                         feedback.extend(analysis_feedback)
                         
                         if not analysis_feedback:
@@ -208,8 +205,6 @@ def analyze_frame(request: FrameRequest):
                                 CALIBRATED_MIN_ANGLE, CALIBRATED_MAX_ANGLE = dynamic_min_angle, dynamic_max_angle
                                 MIN_ANGLE_THRESHOLD_FULL, MAX_ANGLE_THRESHOLD_FULL = CALIBRATED_MIN_ANGLE + 5, CALIBRATED_MAX_ANGLE - 5
                                 MIN_ANGLE_THRESHOLD_PARTIAL, MAX_ANGLE_THRESHOLD_PARTIAL = CALIBRATED_MIN_ANGLE + 20, CALIBRATED_MAX_ANGLE - 20
-                                
-                                # Assuming calculate_accuracy returns a decimal (0.0 to 1.0)
                                 frame_accuracy = calculate_accuracy(angle, CALIBRATED_MIN_ANGLE, CALIBRATED_MAX_ANGLE)
                                 accuracy = frame_accuracy
 
@@ -222,14 +217,14 @@ def analyze_frame(request: FrameRequest):
                                         rep_amount = 0.0
                                         if angle > MAX_ANGLE_THRESHOLD_FULL: rep_amount, success_message = 1.0, "FULL Rep Completed! Well done."
                                         else: rep_amount, success_message = 0.5, "Partial Rep (50%) counted. Complete the movement."
-                                        
+                                            
                                         if rep_amount > 0:
                                             stage, partial_rep_buffer, last_rep_time = "down", partial_rep_buffer + rep_amount, current_time
                                             if partial_rep_buffer >= 1.0: reps, partial_rep_buffer = reps + int(partial_rep_buffer), partial_rep_buffer % 1.0
                                             feedback.append({"type": "encouragement", "message": f"{success_message} Total reps: {reps}"})
                                         else: feedback.append({"type": "warning", "message": "Incomplete return to starting position."})
                                     else: feedback.append({"type": "warning", "message": "Slow down! Ensure controlled return."})
-                                
+                                    
                                 if not any(f['type'] in ['warning', 'instruction', 'encouragement'] for f in feedback):
                                     if stage == 'up' and angle > MIN_ANGLE_THRESHOLD_FULL: feedback.append({"type": "progress", "message": "Push further to the maximum range."})
                                     elif stage == 'down' and angle < MAX_ANGLE_THRESHOLD_FULL: feedback.append({"type": "progress", "message": "Return fully to the starting position."})
@@ -237,11 +232,10 @@ def analyze_frame(request: FrameRequest):
                                     elif stage == 'up': feedback.append({"type": "progress", "message": "Controlled movement upward."})
                     else: feedback.append({"type": "warning", "message": "Analysis function missing."})
         
-        drawing_landmarks = get_2d_landmarks(landmarks) 
-        
         # 🟢 FIX: Convert accuracy from a decimal (e.g., 0.95) to a percentage (e.g., 95.0)
         final_accuracy_display = accuracy * 100
-        
+
+        drawing_landmarks = get_2d_landmarks(landmarks) if landmarks else []
         new_state = {"reps": reps, "stage": stage, "angle": round(angle, 1), "last_rep_time": last_rep_time, "dynamic_max_angle": dynamic_max_angle, "dynamic_min_angle": dynamic_min_angle, "frame_count": frame_count, "partial_rep_buffer": partial_rep_buffer, "analysis_side": analysis_side}
 
         return {
@@ -258,10 +252,13 @@ def analyze_frame(request: FrameRequest):
         }
 
     except Exception as e:
+        # Crucial for catching the intermittent MediaPipe timestamp error 
+        # and preventing the server from crashing into a 502 error state.
         error_detail = str(e)
         if "Packet timestamp mismatch" in error_detail or "CalculatorGraph::Run() failed" in error_detail:
-            print(f"Handled MediaPipe Timestamp Error: {error_detail}")
-            raise HTTPException(status_code=400, detail="Transient analysis error. Please try again.")
+              print(f"Handled MediaPipe Timestamp Error: {error_detail}")
+              # Return a temporary error message that allows the client to retry
+              raise HTTPException(status_code=400, detail="Transient analysis error. Please try again.")
         
         print(f"CRITICAL ERROR in analyze_frame: {error_detail}")
         traceback.print_exc()
