@@ -60,6 +60,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+class UserCredentials(BaseModel):
+    email: str
+    password: str
 
 # --- SUPABASE CONFIGURATION ---
 try:
@@ -76,57 +79,144 @@ except Exception as e:
 # =========================================================================
 # 2. DATA MODELS & CONFIGURATION
 # =========================================================================
-class Landmark2D(BaseModel): x: float; y: float; visibility: float = 1.0
-class FrameRequest(BaseModel): frame: str; exercise_name: str; previous_state: Dict | None = None
-class AilmentRequest(BaseModel): ailment: str
-class SessionData(BaseModel): user_id: str; exercise_name: str; reps_completed: int; accuracy_score: float
-class ChatRequest(BaseModel): message: str; session_id: str
-class UserCredentials(BaseModel):
-    email: str
-    password: str
+# =========================================================================
+# 2. DATA MODELS & CONFIGURATION (Unchanged)
+# =========================================================================
+class Landmark2D(BaseModel):
+  x: float
+  y: float
+  visibility: float = 1.0
+
+class FrameRequest(BaseModel):
+  frame: str
+  exercise_name: str
+  previous_state: Dict | None = None
+
+class AilmentRequest(BaseModel):
+  ailment: str
+
+class SessionData(BaseModel):
+  # The SessionData model must align with your Supabase table columns
+  user_id: str
+  exercise_name: str
+  reps_completed: int
+  accuracy_score: float
+  # Note: duration_seconds and feedback fields are likely needed in the final system,
+  # but based on the provided data model, we'll stick to these four for now.
+
 
 EXERCISE_CONFIGS = {
-    "shoulder flexion": {"min_angle": 30, "max_angle": 170, "debounce": 1.5, "calibration_frames": 20},
-    "shoulder abduction": {"min_angle": 30, "max_angle": 170, "debounce": 1.5, "calibration_frames": 20},
-    "elbow flexion": {"min_angle": 40, "max_angle": 170, "debounce": 1.5, "calibration_frames": 20},
-    "elbow extension": {"min_angle": 150, "max_angle": 180, "debounce": 1.5, "calibration_frames": 20},
-    "shoulder internal rotation": {"min_angle": 40, "max_angle": 110, "debounce": 1.5, "calibration_frames": 20},
-    "knee flexion": {"min_angle": 40, "max_angle": 170, "debounce": 1.5, "calibration_frames": 20},
-    "ankle dorsiflexion": {"min_angle": 80, "max_angle": 110, "debounce": 1.5, "calibration_frames": 20},
-    "wrist flexion": {"min_angle": 60, "max_angle": 120, "debounce": 1.5, "calibration_frames": 20}
+  "shoulder flexion": {"min_angle": 30, "max_angle": 170, "debounce": 1.5, "calibration_frames": 20},
+  "shoulder abduction": {"min_angle": 30, "max_angle": 170, "debounce": 1.5, "calibration_frames": 20},
+  "elbow flexion": {"min_angle": 40, "max_angle": 170, "debounce": 1.5, "calibration_frames": 20},
+  "elbow extension": {"min_angle": 150, "max_angle": 180, "debounce": 1.5, "calibration_frames": 20},
+  "shoulder internal rotation": {"min_angle": 40, "max_angle": 110, "debounce": 1.5, "calibration_frames": 20},
+  "knee flexion": {"min_angle": 40, "max_angle": 170, "debounce": 1.5, "calibration_frames": 20},
+  "ankle dorsiflexion": {"min_angle": 80, "max_angle": 110, "debounce": 1.5, "calibration_frames": 20},
+  "wrist flexion": {"min_angle": 60, "max_angle": 120, "debounce": 1.5, "calibration_frames": 20}
 }
 
 EXERCISE_PLANS = {
-    "shoulder injury": {"ailment": "shoulder injury", "exercises": [{ "name": "Shoulder Flexion", "description": "Raise your arm forward and up", "target_reps": 5, "sets": 3, "rest_seconds": 30 }, { "name": "Shoulder Abduction", "description": "Raise your arm out to the side", "target_reps": 12, "sets": 3, "rest_seconds": 30 }, { "name": "Shoulder Internal Rotation", "description": "Rotate arm inward, keeping elbow bent.", "target_reps": 10, "sets": 3, "rest_seconds": 30 }], "difficulty_level": "beginner", "duration_weeks": 6},
-    "leg/knee injury": {"ailment": "leg/knee injury", "exercises": [{ "name": "Knee Flexion", "description": "Slide your heel towards your hip.",  "target_reps": 5, "sets": 3, "rest_seconds": 30 }, { "name": "Ankle Dorsiflexion", "description": "Pull your foot up toward your shin.", "target_reps": 15, "sets": 3, "rest_seconds": 30 }], "difficulty_level": "beginner", "duration_weeks": 6},
-    "elbow injury": {"ailment": "elbow injury", "exercises": [{ "name": "Elbow Flexion", "description": "Bend your elbow bringing hand toward shoulder",  "target_reps": 5, "sets": 3, "rest_seconds": 30}, { "name": "Elbow Extension", "description": "Straighten your elbow completely", "target_reps": 15, "sets": 3, "rest_seconds": 30 }], "difficulty_level": "beginner", "duration_weeks": 4},
-    "wrist injury": {"ailment": "wrist injury", "exercises": [{ "name": "Wrist Flexion", "description": "Bend your wrist forward and back.",  "target_reps": 5, "sets": 3, "rest_seconds": 30}], "difficulty_level": "beginner", "duration_weeks": 3}
+  "shoulder injury": {"ailment": "shoulder injury", "exercises": [{ "name": "Shoulder Flexion", "description": "Raise your arm forward and up", "target_reps": 1, "sets": 1, "rest_seconds": 3 }, { "name": "Shoulder Abduction", "description": "Raise your arm out to the side", "target_reps": 12, "sets": 3, "rest_seconds": 30 }, { "name": "Shoulder Internal Rotation", "description": "Rotate arm inward, keeping elbow bent.", "target_reps": 10, "sets": 3, "rest_seconds": 30 }], "difficulty_level": "beginner", "duration_weeks": 6},
+  "leg/knee injury": {"ailment": "leg/knee injury", "exercises": [{ "name": "Knee Flexion", "description": "Slide your heel towards your hip.", "target_reps": 1, "sets": 1, "rest_seconds": 3 }, { "name": "Ankle Dorsiflexion", "description": "Pull your foot up toward your shin.", "target_reps": 15, "sets": 3, "rest_seconds": 30 }], "difficulty_level": "beginner", "duration_weeks": 6},
+  "elbow injury": {"ailment": "elbow injury", "exercises": [{ "name": "Elbow Flexion", "description": "Bend your elbow bringing hand toward shoulder", "target_reps": 1, "sets": 1, "rest_seconds": 3 }, { "name": "Elbow Extension", "description": "Straighten your elbow completely", "target_reps": 15, "sets": 3, "rest_seconds": 30 }], "difficulty_level": "beginner", "duration_weeks": 4},
+  "wrist injury": {"ailment": "wrist injury", "exercises": [{ "name": "Wrist Flexion", "description": "Bend your wrist forward and back.", "target_reps": 1, "sets": 1, "rest_seconds": 3 }], "difficulty_level": "beginner", "duration_weeks": 3}
 }
 
 # =========================================================================
-# 3. UTILITY & ANALYSIS FUNCTIONS
+# 3. UTILITY FUNCTIONS (Unchanged)
 # =========================================================================
-AnalysisResult = Tuple[float, Dict, List]
-def get_best_side(landmarks) -> Optional[str]: return 'left'
-def calculate_angle_2d(a: Any, b: Any, c: Any) -> float: return 0.0
-def get_2d_landmarks(landmarks: Any) -> List[Dict]: return [{"x": 0.5, "y": 0.5, "visibility": 1.0}] * 33 if landmarks else []
-def calculate_accuracy(current_angle: float, min_range: float, max_range: float) -> float: return 0.0
-def analyze_shoulder_flexion(landmarks: Any, side: str) -> AnalysisResult: return 0.0, {}, []
-def analyze_shoulder_abduction(landmarks: Any, side: str) -> AnalysisResult: return analyze_shoulder_flexion(landmarks, side)
-def analyze_shoulder_internal_rotation(landmarks: Any, side: str) -> AnalysisResult: return 0.0, {}, []
-def analyze_elbow_flexion(landmarks: Any, side: str) -> AnalysisResult: return 0.0, {}, []
-def analyze_elbow_extension(landmarks: Any, side: str) -> AnalysisResult: return analyze_elbow_flexion(landmarks, side)
-def analyze_knee_flexion(landmarks: Any, side: str) -> AnalysisResult: return 0.0, {}, []
-def analyze_ankle_dorsiflexion(landmarks: Any, side: str) -> AnalysisResult: return 0.0, {}, []
-def analyze_wrist_flexion(landmarks: Any, side: str) -> AnalysisResult: return 0.0, {}, []
+def get_best_side(landmarks):
+  left_vis = (landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].visibility + landmarks[mp_pose.PoseLandmark.LEFT_HIP.value].visibility) / 2
+  right_vis = (landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value].visibility + landmarks[mp_pose.PoseLandmark.RIGHT_HIP.value].visibility) / 2
+  if left_vis > right_vis and left_vis > 0.6: return "left"
+  elif right_vis > 0.6: return "right"
+  else: return None
+
+def calculate_angle_2d(a, b, c):
+  a, b, c = np.array(a), np.array(b), np.array(c)
+  if np.all(a == b) or np.all(c == b): return 0.0
+  radians = np.arctan2(c[1] - b[1], c[0] - b[0]) - np.arctan2(a[1] - b[1], a[0] - b[0])
+  angle = np.abs(radians * 180.0 / np.pi)
+  if angle > 180.0: angle = 360 - angle
+  return angle
+
+def get_2d_landmarks(landmarks):
+  return [{"x": lm.x, "y": lm.y, "visibility": lm.visibility} for lm in landmarks]
+
+def calculate_accuracy(current_angle: float, min_range: float, max_range: float) -> float:
+  if min_range >= max_range: return 0.0
+  TARGET_MIN, TARGET_MAX, BUFFER = min_range, max_range, 10
+  if current_angle >= TARGET_MIN and current_angle <= TARGET_MAX: return 100.0
+  deviation = max(TARGET_MIN - current_angle, current_angle - TARGET_MAX)
+  if deviation > BUFFER: return 0.0
+  score = 100 * (1 - (deviation / BUFFER))
+  return max(0.0, min(100.0, score))
+
+def get_landmark_indices(side: str):
+  is_left = side == "left"
+  return {"HIP": mp_pose.PoseLandmark.LEFT_HIP.value if is_left else mp_pose.PoseLandmark.RIGHT_HIP.value, "SHOULDER": mp_pose.PoseLandmark.LEFT_SHOULDER.value if is_left else mp_pose.PoseLandmark.RIGHT_SHOULDER.value, "ELBOW": mp_pose.PoseLandmark.LEFT_ELBOW.value if is_left else mp_pose.PoseLandmark.RIGHT_ELBOW.value, "WRIST": mp_pose.PoseLandmark.LEFT_WRIST.value if is_left else mp_pose.PoseLandmark.RIGHT_WRIST.value, "KNEE": mp_pose.PoseLandmark.LEFT_KNEE.value if is_left else mp_pose.PoseLandmark.RIGHT_KNEE.value, "ANKLE": mp_pose.PoseLandmark.LEFT_ANKLE.value if is_left else mp_pose.PoseLandmark.RIGHT_ANKLE.value, "FOOT_INDEX": mp_pose.PoseLandmark.LEFT_FOOT_INDEX.value if is_left else mp_pose.PoseLandmark.RIGHT_FOOT_INDEX.value, "INDEX": mp_pose.PoseLandmark.LEFT_INDEX.value if is_left else mp_pose.PoseLandmark.RIGHT_INDEX.value,}
+
+# =========================================================================
+# 4. EXERCISE ANALYSIS FUNCTIONS (Unchanged)
+# =========================================================================
+def analyze_shoulder_flexion(landmarks, side: str):
+  indices = get_landmark_indices(side)
+  LM_HIP, LM_SHOULDER, LM_ELBOW = indices["HIP"], indices["SHOULDER"], indices["ELBOW"]
+  if landmarks[LM_HIP].visibility < 0.5 or landmarks[LM_SHOULDER].visibility < 0.5 or landmarks[LM_ELBOW].visibility < 0.5: return 0, {}, [{"type": "warning", "message": f"Low visibility for {side} shoulder/hip/elbow."}]
+  P_HIP, P_SHOULDER, P_ELBOW = [landmarks[LM_HIP].x, landmarks[LM_HIP].y], [landmarks[LM_SHOULDER].x, landmarks[LM_SHOULDER].y], [landmarks[LM_ELBOW].x, landmarks[LM_ELBOW].y]
+  angle = calculate_angle_2d(P_HIP, P_SHOULDER, P_ELBOW)
+  angle_coords = {"A": {"x": P_HIP[0], "y": P_HIP[1]}, "B": {"x": P_SHOULDER[0], "y": P_SHOULDER[1]}, "C": {"x": P_ELBOW[0], "y": P_ELBOW[1]},}
+  return angle, angle_coords, []
+def analyze_shoulder_abduction(landmarks, side: str): return analyze_shoulder_flexion(landmarks, side)
+def analyze_shoulder_internal_rotation(landmarks, side: str):
+  indices = get_landmark_indices(side)
+  LM_HIP, LM_ELBOW, LM_WRIST = indices["HIP"], indices["ELBOW"], indices["WRIST"]
+  if landmarks[LM_HIP].visibility < 0.5 or landmarks[LM_ELBOW].visibility < 0.5 or landmarks[LM_WRIST].visibility < 0.5: return 0, {}, [{"type": "warning", "message": f"Low visibility for {side} shoulder/elbow/wrist."}]
+  P_HIP, P_ELBOW, P_WRIST = [landmarks[LM_HIP].x, landmarks[LM_HIP].y], [landmarks[LM_ELBOW].x, landmarks[LM_ELBOW].y], [landmarks[LM_WRIST].x, landmarks[LM_WRIST].y]
+  angle = calculate_angle_2d(P_HIP, P_ELBOW, P_WRIST)
+  angle_coords = {"A": {"x": P_HIP[0], "y": P_HIP[1]}, "B": {"x": P_ELBOW[0], "y": P_ELBOW[1]}, "C": {"x": P_WRIST[0], "y": P_WRIST[1]},}
+  return angle, angle_coords, []
+def analyze_elbow_flexion(landmarks, side: str):
+  indices = get_landmark_indices(side)
+  LM_SHOULDER, LM_ELBOW, LM_WRIST = indices["SHOULDER"], indices["ELBOW"], indices["WRIST"]
+  if landmarks[LM_SHOULDER].visibility < 0.5 or landmarks[LM_ELBOW].visibility < 0.5 or landmarks[LM_WRIST].visibility < 0.5: return 0, {}, [{"type": "warning", "message": f"Low visibility for {side} elbow/wrist/shoulder."}]
+  P_SHOULDER, P_ELBOW, P_WRIST = [landmarks[LM_SHOULDER].x, landmarks[LM_SHOULDER].y], [landmarks[LM_ELBOW].x, landmarks[LM_ELBOW].y], [landmarks[LM_WRIST].x, landmarks[LM_WRIST].y]
+  angle = calculate_angle_2d(P_SHOULDER, P_ELBOW, P_WRIST)
+  angle_coords = {"A": {"x": P_SHOULDER[0], "y": P_SHOULDER[1]}, "B": {"x": P_ELBOW[0], "y": P_ELBOW[1]}, "C": {"x": P_WRIST[0], "y": P_WRIST[1]},}
+  return angle, angle_coords, []
+def analyze_elbow_extension(landmarks, side: str): return analyze_elbow_flexion(landmarks, side)
+def analyze_knee_flexion(landmarks, side: str):
+  indices = get_landmark_indices(side)
+  LM_HIP, LM_KNEE, LM_ANKLE = indices["HIP"], indices["KNEE"], indices["ANKLE"]
+  if landmarks[LM_HIP].visibility < 0.5 or landmarks[LM_KNEE].visibility < 0.5 or landmarks[LM_ANKLE].visibility < 0.5: return 0, {}, [{"type": "warning", "message": f"Low visibility for {side} hip/knee/ankle."}]
+  P_HIP, P_KNEE, P_ANKLE = [landmarks[LM_HIP].x, landmarks[LM_HIP].y], [landmarks[LM_KNEE].x, landmarks[LM_KNEE].y], [landmarks[LM_ANKLE].x, landmarks[LM_ANKLE].y]
+  angle = calculate_angle_2d(P_HIP, P_KNEE, P_ANKLE)
+  angle_coords = {"A": {"x": P_HIP[0], "y": P_HIP[1]}, "B": {"x": P_KNEE[0], "y": P_KNEE[1]}, "C": {"x": P_ANKLE[0], "y": P_ANKLE[1]},}
+  return angle, angle_coords, []
+def analyze_ankle_dorsiflexion(landmarks, side: str):
+  indices = get_landmark_indices(side)
+  LM_KNEE, LM_ANKLE, LM_FOOT = indices["KNEE"], indices["ANKLE"], indices["FOOT_INDEX"]
+  if landmarks[LM_KNEE].visibility < 0.5 or landmarks[LM_ANKLE].visibility < 0.5 or landmarks[LM_FOOT].visibility < 0.5: return 0, {}, [{"type": "warning", "message": f"Low visibility for {side} knee/ankle/foot."}]
+  P_KNEE, P_ANKLE, P_FOOT = [landmarks[LM_KNEE].x, landmarks[LM_KNEE].y], [landmarks[LM_ANKLE].x, landmarks[LM_ANKLE].y], [landmarks[LM_FOOT].x, landmarks[LM_FOOT].y]
+  angle = calculate_angle_2d(P_KNEE, P_ANKLE, P_FOOT)
+  angle_coords = {"A": {"x": P_KNEE[0], "y": P_KNEE[1]}, "B": {"x": P_ANKLE[0], "y": P_ANKLE[1]}, "C": {"x": P_FOOT[0], "y": P_FOOT[1]},}
+  return angle, angle_coords, []
+def analyze_wrist_flexion(landmarks, side: str):
+  indices = get_landmark_indices(side)
+  LM_ELBOW, LM_WRIST, LM_FINGER = indices["ELBOW"], indices["WRIST"], indices["INDEX"]
+  if landmarks[LM_ELBOW].visibility < 0.5 or landmarks[LM_WRIST].visibility < 0.5 or landmarks[LM_FINGER].visibility < 0.5: return 0, {}, [{"type": "warning", "message": f"Low visibility for {side} elbow/wrist/finger."}]
+  P_ELBOW, P_WRIST, P_FINGER = [landmarks[LM_ELBOW].x, landmarks[LM_ELBOW].y], [landmarks[LM_WRIST].x, landmarks[LM_WRIST].y], [landmarks[LM_FINGER].x, landmarks[LM_FINGER].y]
+  angle = calculate_angle_2d(P_ELBOW, P_WRIST, P_FINGER)
+  angle_coords = {"A": {"x": P_ELBOW[0], "y": P_ELBOW[1]}, "B": {"x": P_WRIST[0], "y": P_WRIST[1]}, "C": {"x": P_FINGER[0], "y": P_FINGER[1]},}
+  return angle, angle_coords, []
 
 ANALYSIS_MAP = {
-    "shoulder flexion": analyze_shoulder_flexion, "shoulder abduction": analyze_shoulder_abduction,
-    "shoulder internal rotation": analyze_shoulder_internal_rotation, "elbow flexion": analyze_elbow_flexion,
-    "elbow extension": analyze_elbow_extension, "knee flexion": analyze_knee_flexion,
-    "ankle dorsiflexion": analyze_ankle_dorsiflexion, "wrist flexion": analyze_wrist_flexion,
+  "shoulder flexion": analyze_shoulder_flexion, "shoulder abduction": analyze_shoulder_abduction,
+  "shoulder internal rotation": analyze_shoulder_internal_rotation, "elbow flexion": analyze_elbow_flexion,
+  "elbow extension": analyze_elbow_extension, "knee flexion": analyze_knee_flexion,
+  "ankle dorsiflexion": analyze_ankle_dorsiflexion, "wrist flexion": analyze_wrist_flexion,
 }
-
 # =========================================================================
 # 4. API ENDPOINTS
 # =========================================================================
@@ -141,145 +231,116 @@ def get_exercise_plan(request: AilmentRequest):
 
 @app.post("/api/analyze_frame")
 def analyze_frame(request: FrameRequest):
-    # --- State Initialization ---
-    DEFAULT_STATE = {
-        "reps": 0, "stage": "down", "last_rep_time": 0, 
-        "dynamic_max_angle": 0, "dynamic_min_angle": 180, 
-        "frame_count": 0, "partial_rep_buffer": 0.0, 
-        "analysis_side": None, "calibrated": False # NEW: Calibration status flag
-    }
-    current_state = request.previous_state or DEFAULT_STATE
+  # ⚠️ We must rely on the global 'pose' object for performance stability.
+  global pose 
+  
+  reps, stage, last_rep_time = 0, "down", 0
+  angle, angle_coords, feedback, accuracy = 0, {}, [], 0.0
+  DEFAULT_STATE = {"reps": 0, "stage": "down", "last_rep_time": 0, "dynamic_max_angle": 0, "dynamic_min_angle": 180, "frame_count": 0, "partial_rep_buffer": 0.0, "analysis_side": None}
+  
+  current_state = {**DEFAULT_STATE, **(request.previous_state or {})}
+  reps = current_state["reps"]
+  stage = current_state["stage"]
+  last_rep_time = current_state["last_rep_time"]
+  dynamic_max_angle = current_state["dynamic_max_angle"]
+  dynamic_min_angle = current_state["dynamic_min_angle"]
+  frame_count = current_state["frame_count"]
+  partial_rep_buffer = current_state["partial_rep_buffer"]
+  analysis_side = current_state["analysis_side"]
+
+  try:
+    header, encoded = request.frame.split(',', 1) if ',' in request.frame else ('', request.frame)
+    img_data = base64.b64decode(encoded)
+    nparr = np.frombuffer(img_data, np.uint8)
+    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+    if frame is None or frame.size == 0: 
+      return {"reps": reps, "feedback": [{"type": "warning", "message": "Video stream data corrupted."}], "accuracy_score": 0.0, "state": current_state, "drawing_landmarks": [], "current_angle": 0, "angle_coords": {}}
+
+    image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = pose.process(image_rgb)
     
-    # Unpack state variables for clarity
-    reps = current_state.get("reps", 0)
-    stage = current_state.get("stage", "down")
-    last_rep_time = current_state.get("last_rep_time", 0)
-    dynamic_max_angle = current_state.get("dynamic_max_angle", 0)
-    dynamic_min_angle = current_state.get("dynamic_min_angle", 180)
-    frame_count = current_state.get("frame_count", 0)
-    partial_rep_buffer = current_state.get("partial_rep_buffer", 0.0)
-    analysis_side = current_state.get("analysis_side", None)
-    calibrated = current_state.get("calibrated", False) # NEW
-
-    # Initialize response variables
-    angle, angle_coords, feedback, accuracy = 0, {}, [], 0.0
-
-    try:
-        # --- Frame Decoding ---
-        header, encoded = request.frame.split(',', 1)
-        img_data = base64.b64decode(encoded)
-        nparr = np.frombuffer(img_data, np.uint8)
-        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
-        if frame is None or frame.size == 0:
-            # Handle corrupted frame data
-            return {"reps": reps, "feedback": [{"type": "warning", "message": "Video stream data corrupted."}], "accuracy_score": 0.0, "state": current_state, "drawing_landmarks": [], "current_angle": 0, "angle_coords": {}}
-
-        # --- Pose Detection ---
-        image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = pose.process(image_rgb)
-        
-        if not results.pose_landmarks:
-            feedback.append({"type": "warning", "message": "No pose detected. Adjust camera view."})
+    landmarks = None
+    
+    if not results.pose_landmarks:
+      feedback.append({"type": "warning", "message": "No pose detected. Adjust camera view."})
+    else:
+      landmarks = results.pose_landmarks.landmark
+      exercise_name = request.exercise_name.lower()
+      if analysis_side is None: analysis_side = get_best_side(landmarks)
+      
+      if analysis_side is None:
+        feedback.append({"type": "warning", "message": "Please turn sideways or expose one full side."})
+      else:
+        config = EXERCISE_CONFIGS.get(exercise_name, {})
+        if not config: feedback.append({"type": "warning", "message": f"Configuration not found for: {exercise_name}"})
         else:
-            landmarks = results.pose_landmarks.landmark
-            exercise_name = request.exercise_name.lower()
-
-            if analysis_side is None:
-                analysis_side = get_best_side(landmarks)
+          analysis_func = ANALYSIS_MAP.get(exercise_name)
+          if analysis_func:
+            angle, angle_coords, analysis_feedback = analysis_func(landmarks, analysis_side)
+            feedback.extend(analysis_feedback)
             
-            if analysis_side is None:
-                feedback.append({"type": "warning", "message": "Please turn sideways to the camera."})
-            else:
-                config = EXERCISE_CONFIGS.get(exercise_name)
-                analysis_func = ANALYSIS_MAP.get(exercise_name)
+            if not analysis_feedback:
+              CALIBRATION_FRAMES, DEBOUNCE_TIME = config['calibration_frames'], config['debounce']
+              current_time = time.time()
+              
+              if frame_count < CALIBRATION_FRAMES and reps == 0:
+                dynamic_max_angle = max(dynamic_max_angle, angle)
+                dynamic_min_angle = min(dynamic_min_angle, angle)
+                frame_count += 1
+                feedback.append({"type": "progress", "message": f"Calibrating range ({frame_count}/{CALIBRATION_FRAMES}). Move fully from start to finish position."})
+                accuracy = 0.0
+                
+              if frame_count >= CALIBRATION_FRAMES or reps > 0:
+                CALIBRATED_MIN_ANGLE, CALIBRATED_MAX_ANGLE = dynamic_min_angle, dynamic_max_angle
+                MIN_ANGLE_THRESHOLD_FULL, MAX_ANGLE_THRESHOLD_FULL = CALIBRATED_MIN_ANGLE + 5, CALIBRATED_MAX_ANGLE - 5
+                MIN_ANGLE_THRESHOLD_PARTIAL, MAX_ANGLE_THRESHOLD_PARTIAL = CALIBRATED_MIN_ANGLE + 20, CALIBRATED_MAX_ANGLE - 20
+                frame_accuracy = calculate_accuracy(angle, CALIBRATED_MIN_ANGLE, CALIBRATED_MAX_ANGLE)
+                accuracy = frame_accuracy
 
-                if not config or not analysis_func:
-                    feedback.append({"type": "error", "message": f"Exercise '{exercise_name}' not configured."})
-                else:
-                    # --- Core Analysis ---
-                    angle, angle_coords, analysis_feedback = analysis_func(landmarks, analysis_side)
-                    feedback.extend(analysis_feedback)
-                    
-                    if not analysis_feedback: # Proceed only if base analysis (e.g., visibility) passes
-                        CALIBRATION_FRAMES = config['calibration_frames']
-                        DEBOUNCE_TIME = config['debounce']
-                        MINIMUM_ROM_THRESHOLD = config.get('min_rom', 30) # Minimum range of motion in degrees
+                if angle < MIN_ANGLE_THRESHOLD_PARTIAL:
+                  stage = "up"
+                  feedback.append({"type": "instruction", "message": "Hold contracted position at the top!" if angle < MIN_ANGLE_THRESHOLD_FULL else "Go deeper for a full rep."})
+                
+                if angle > MAX_ANGLE_THRESHOLD_PARTIAL and stage == "up":
+                  if current_time - last_rep_time > DEBOUNCE_TIME:
+                    rep_amount = 0.0
+                    if angle > MAX_ANGLE_THRESHOLD_FULL: rep_amount, success_message = 1.0, "FULL Rep Completed! Well done."
+                    else: rep_amount, success_message = 0.5, "Partial Rep (50%) counted. Complete the movement."
+                      
+                    if rep_amount > 0:
+                      stage, partial_rep_buffer, last_rep_time = "down", partial_rep_buffer + rep_amount, current_time
+                      if partial_rep_buffer >= 1.0: reps, partial_rep_buffer = reps + int(partial_rep_buffer), partial_rep_buffer % 1.0
+                      feedback.append({"type": "encouragement", "message": f"{success_message} Total reps: {reps}"})
+                    else: feedback.append({"type": "warning", "message": "Incomplete return to starting position."})
+                  else: feedback.append({"type": "warning", "message": "Slow down! Ensure controlled return."})
+                  
+                if not any(f['type'] in ['warning', 'instruction', 'encouragement'] for f in feedback):
+                  if stage == 'up' and angle > MIN_ANGLE_THRESHOLD_FULL: feedback.append({"type": "progress", "message": "Push further to the maximum range."})
+                  elif stage == 'down' and angle < MAX_ANGLE_THRESHOLD_FULL: feedback.append({"type": "progress", "message": "Return fully to the starting position."})
+                  elif stage == 'down': feedback.append({"type": "progress", "message": "Ready to start the next rep."})
+                  elif stage == 'up': feedback.append({"type": "progress", "message": "Controlled movement upward."})
+          else: feedback.append({"type": "warning", "message": "Analysis function missing."})
+    
+    final_accuracy_display = accuracy
+    drawing_landmarks = get_2d_landmarks(landmarks) if landmarks else []
+    new_state = {"reps": reps, "stage": stage, "angle": round(angle, 1), "last_rep_time": last_rep_time, "dynamic_max_angle": dynamic_max_angle, "dynamic_min_angle": dynamic_min_angle, "frame_count": frame_count, "partial_rep_buffer": partial_rep_buffer, "analysis_side": analysis_side}
 
-                        # --- Calibration Logic ---
-                        if not calibrated:
-                            frame_count += 1
-                            if frame_count <= CALIBRATION_FRAMES:
-                                dynamic_max_angle = max(dynamic_max_angle, angle)
-                                dynamic_min_angle = min(dynamic_min_angle, angle)
-                                feedback.append({"type": "progress", "message": f"Calibrating ({frame_count}/{CALIBRATION_FRAMES}). Please perform the full movement."})
-                            else:
-                                # FIX: Validate calibration range to prevent counting on no movement
-                                calibrated_rom = dynamic_max_angle - dynamic_min_angle
-                                if calibrated_rom < MINIMUM_ROM_THRESHOLD:
-                                    # Reset if calibration range is too small
-                                    frame_count = 0
-                                    dynamic_max_angle = 0
-                                    dynamic_min_angle = 180
-                                    feedback.append({"type": "warning", "message": f"Calibration failed (Range: {int(calibrated_rom)}°). Please perform a full, clear repetition."})
-                                else:
-                                    # Successful calibration
-                                    calibrated = True
-                                    feedback.append({"type": "success", "message": "Calibration Complete! You can start your reps."})
-                        
-                        # --- Rep Counting Logic (only runs after successful calibration) ---
-                        if calibrated:
-                            CALIBRATED_MIN_ANGLE, CALIBRATED_MAX_ANGLE = dynamic_min_angle, dynamic_max_angle
-                            
-                            # Define thresholds based on calibrated range
-                            MIN_ANGLE_THRESHOLD = CALIBRATED_MIN_ANGLE + 0.15 * (CALIBRATED_MAX_ANGLE - CALIBRATED_MIN_ANGLE)
-                            MAX_ANGLE_THRESHOLD = CALIBRATED_MAX_ANGLE - 0.15 * (CALIBRATED_MAX_ANGLE - CALIBRATED_MIN_ANGLE)
+    return {"reps": reps, "feedback": feedback if feedback else [{"type": "progress", "message": "Processing..."}], "accuracy_score": round(final_accuracy_display, 2), "state": new_state, "drawing_landmarks": drawing_landmarks, "current_angle": round(angle, 1), "angle_coords": angle_coords, "min_angle": round(dynamic_min_angle, 1), "max_angle": round(dynamic_max_angle, 1), "side": analysis_side}
 
-                            accuracy = calculate_accuracy(angle, CALIBRATED_MIN_ANGLE, CALIBRATED_MAX_ANGLE)
-                            
-                            # State transition to "up" (contracted position)
-                            if angle <= MIN_ANGLE_THRESHOLD and stage == 'down':
-                                stage = "up"
-
-                            # State transition to "down" (extended position) + REP COUNT
-                            elif angle >= MAX_ANGLE_THRESHOLD and stage == 'up':
-                                reps += 1
-                                stage = "down"
-                                last_rep_time = time.time()
-                                feedback.append({"type": "success", "message": f"Rep #{reps} counted!"})
-                            
-                            # Provide ongoing feedback based on current stage
-                            if not any(f['type'] == 'success' for f in feedback):
-                                if stage == 'down':
-                                    feedback.append({"type": "progress", "message": "Begin the upward movement."})
-                                elif stage == 'up':
-                                    feedback.append({"type": "progress", "message": "Return to the starting position."})
-
-
-        # --- Prepare Response ---
-        drawing_landmarks = get_2d_landmarks(landmarks) if results.pose_landmarks else []
-        new_state = {
-            "reps": reps, "stage": stage, "last_rep_time": last_rep_time,
-            "dynamic_max_angle": dynamic_max_angle, "dynamic_min_angle": dynamic_min_angle,
-            "frame_count": frame_count, "partial_rep_buffer": partial_rep_buffer,
-            "analysis_side": analysis_side, "calibrated": calibrated # NEW: Persist calibration state
-        }
-
-        return {
-            "reps": reps,
-            "feedback": feedback if feedback else [{"type": "progress", "message": "Analyzing..."}],
-            "accuracy_score": round(accuracy, 2),
-            "state": new_state,
-            "drawing_landmarks": drawing_landmarks,
-            "current_angle": round(angle, 1),
-            "angle_coords": angle_coords,
-            "side": analysis_side
-        }
-
-    except Exception as e:
-        print(f"CRITICAL ERROR in analyze_frame: {e}")
-        traceback.print_exc() 
-        raise HTTPException(status_code=500, detail=f"Unexpected server error during analysis: {str(e)}")
+  except Exception as e:
+    # Crucial for catching the intermittent MediaPipe timestamp error 
+    # and preventing the server from crashing into a 502 error state.
+    error_detail = str(e)
+    if "Packet timestamp mismatch" in error_detail or "CalculatorGraph::Run() failed" in error_detail:
+      print(f"Handled MediaPipe Timestamp Error: {error_detail}")
+      # Return a temporary error message that allows the client to retry
+      raise HTTPException(status_code=400, detail="Transient analysis error. Please try again.")
+    
+    print(f"CRITICAL ERROR in analyze_frame: {error_detail}")
+    traceback.print_exc()
+    raise HTTPException(status_code=500, detail=f"Unexpected server error during analysis: {error_detail}")
+  # 🚫 NO 'finally: pose.close()' because the 'pose' object is global
 
 # =========================================================================
 # 5. API ENDPOINTS (Authentication, Session & Progress)
