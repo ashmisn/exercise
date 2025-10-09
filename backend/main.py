@@ -63,6 +63,7 @@ app.add_middleware(
 class UserCredentials(BaseModel):
     email: str
     password: str
+class ChatRequest(BaseModel): message: str; session_id: str
 
 # --- SUPABASE CONFIGURATION ---
 try:
