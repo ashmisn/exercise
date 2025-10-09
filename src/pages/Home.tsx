@@ -76,15 +76,15 @@ const AILMENTS = [
 
 const MOCK_PROGRESS = {
 
-  totalReps: 1240,
+  totalReps: 0,
 
-  avgAccuracy: 92.5,
+  avgAccuracy: 0,
 
-  sessionsThisWeek: 4,
+  sessionsThisWeek: 0,
 
-  lastSession: 'Shoulder Flexion',
+  lastSession: 'None',
 
-  lastSessionDate: 'October 4, 2025',
+  lastSessionDate: 'None',
 
 };
 
