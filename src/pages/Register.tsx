@@ -391,7 +391,7 @@ export const Register: React.FC<RegisterProps> = ({ onToggleMode }) => {
                         {success && (
                             <div className="bg-emerald-50 border-2 border-emerald-200 text-emerald-700 px-4 py-3 rounded-xl text-sm mb-6 font-medium flex items-center shadow-sm">
                                 <CheckCircle2 className="w-5 h-5 mr-2" />
-                                Profile created! Redirecting to sign in...
+                                Profile created! Please verify the email by clicking the link sent to your inbox. Redirecting to sign in...
                             </div>
                         )}
 
